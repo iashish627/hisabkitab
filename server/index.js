@@ -65,7 +65,19 @@ app.post('/api/auth/login', async (req, res) => {
 app.get('/api/parcels', requireAuth, async (req, res) => {
   const { from, to, mode } = req.query
   const where = [], values = []
-  if (from) { values.push(from); where.push('created_at >= 
+  const placeholder = n => String.fromCharCode(36) + n
+  if (from) {
+    values.push(from)
+    where.push('created_at >= ' + placeholder(values.length) + '::date')
+  }
+  if (to) {
+    values.push(to)
+    where.push('created_at < (' + placeholder(values.length) + "::date + INTERVAL '1 day')")
+  }
+  if (mode && ['dispatch', 'rto', 'return'].includes(mode)) {
+    values.push(mode)
+    where.push('mode = ' + placeholder(values.length))
+  }
   const sql = 'SELECT id, code, customer_name AS "customerName", mode, created_at AS "createdAt" FROM parcel_logs ' +
     (where.length ? 'WHERE ' + where.join(' AND ') : '') + ' ORDER BY created_at DESC LIMIT 20000'
   const { rows } = await pool.query(sql, values)
