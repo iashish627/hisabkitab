@@ -1,6 +1,6 @@
 import express from 'express'
 import pg from 'pg'
-import bcrypt from 'bcryptjs'
+import { scryptSync, timingSafeEqual } from 'node:crypto'
 import jwt from 'jsonwebtoken'
 import helmet from 'helmet'
 import rateLimit from 'express-rate-limit'
@@ -18,6 +18,7 @@ const pool = new Pool({
 
 app.set('trust proxy', 1)
 app.use(helmet({ crossOriginResourcePolicy: false }))
+app.use((req, res, next) => { const origin = req.headers.origin; if (origin === 'https://hisabkitab-s2ho.onrender.com') { res.setHeader('Access-Control-Allow-Origin', origin); res.setHeader('Vary', 'Origin'); res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization'); res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS') }; if (req.method === 'OPTIONS') return res.sendStatus(204); next() })
 app.use(express.json({ limit: '2mb' }))
 app.use('/api/auth', rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false }))
 
@@ -55,7 +56,7 @@ app.post('/api/auth/login', async (req, res) => {
   }
   const valid = username === process.env.ADMIN_USERNAME &&
     typeof password === 'string' &&
-    await bcrypt.compare(password, process.env.ADMIN_PASSWORD_HASH)
+    (() => { try { const [salt, expected] = process.env.ADMIN_PASSWORD_HASH.split(':'); const actual = scryptSync(password, salt, 64).toString('hex'); return timingSafeEqual(Buffer.from(actual, 'hex'), Buffer.from(expected, 'hex')) } catch { return false } })()
   if (!valid) return res.status(401).json({ error: 'Incorrect username or password.' })
   const token = jwt.sign({ sub: process.env.ADMIN_USERNAME }, process.env.JWT_SECRET, { expiresIn: '7d' })
   res.json({ token, username: process.env.ADMIN_USERNAME })
