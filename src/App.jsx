@@ -124,7 +124,7 @@ function App() {
     <main className="main-area">
       <header className="topbar"><div className="top-left"><button className="icon-btn mobile-menu" onClick={() => setMobileOpen(true)}><Menu/></button><div className="crumb">Workspace <span>/</span> <b>{page}</b></div></div><div className="top-actions"><label className="global-search"><Search size={17}/><input placeholder="Search anything..." value={query} onChange={e => setQuery(e.target.value)}/><kbd>⌘ K</kbd></label><button className="icon-btn notification"><Bell size={19}/><i/></button><div className="top-avatar">AM</div></div></header>
       <div className="page-wrap">
-        {page === 'Dashboard' && <Dashboard products={products} orders={orders} expenses={expenses} onNavigate={changePage} onAdd={() => setModal('order')}/>}
+        {page === 'Dashboard' && <Dashboard parcelLogs={parcelLogs} onNavigate={changePage}/>}
         {page === 'Inventory' && <Inventory products={filteredProducts} onAdd={() => setModal('product')} onScan={() => setModal('scanner')} onEdit={p => { setScanValue(p.barcode); setModal('movement') }}/>}
         {page === 'Orders' && <Orders orders={filteredOrders} onAdd={() => setModal('order')}/>}
         {page === 'Incoming' && <ParcelOperations page={page} onScan={mode => { setParcelMode(mode); setScanValue(''); setModal('parcel-scanner') }} parcelLogs={parcelLogs} onDelete={deleteParcel} onExport={exportParcelsCsv} />}
@@ -142,24 +142,37 @@ function PageHeading({ eyebrow, title, desc, action, secondary }) {
   return <div className="page-heading"><div><div className="eyebrow">{eyebrow}</div><h1>{title}</h1><p>{desc}</p></div><div className="heading-actions">{secondary}{action}</div></div>
 }
 function Button({ children, variant = 'primary', onClick, icon: Icon, type = 'button' }) { return <button type={type} className={'btn btn-' + variant} onClick={onClick}>{Icon && <Icon size={16}/ >}{children}</button> }
-function Dashboard({ products, orders, expenses, onNavigate, onAdd }) {
-  const stockValue = products.reduce((s,p) => s + p.stock*p.cost, 0)
-  const low = products.filter(p => p.stock > 0 && p.stock <= 8).length
-  const delivered = orders.reduce((s,o) => s+o.amount,0)
-  const spent = expenses.reduce((s,e) => s+e.amount,0)
+function Dashboard({ parcelLogs = [], onNavigate }) {
+  const [period, setPeriod] = useState('day')
+  const [from, setFrom] = useState(toInputDate(new Date()))
+  const [to, setTo] = useState(toInputDate(new Date()))
+  const now = new Date()
+  const range = useMemo(() => {
+    const end = new Date(now); end.setHours(23,59,59,999)
+    const begin = new Date(now); begin.setHours(0,0,0,0)
+    if (period === 'week') begin.setDate(begin.getDate() - 6)
+    if (period === 'month') begin.setDate(1)
+    if (period === 'custom') { begin.setTime(new Date(from + 'T00:00:00').getTime()); end.setTime(new Date(to + 'T23:59:59').getTime()) }
+    return { begin, end }
+  }, [period, from, to])
+  const logs = parcelLogs.filter(x => { const d = new Date(x.createdAt); return d >= range.begin && d <= range.end })
+  const outgoing = logs.filter(x => x.mode === 'dispatch').length
+  const incoming = logs.filter(x => x.mode === 'rto' || x.mode === 'return').length
+  const periodLabel = period === 'day' ? 'Today' : period === 'week' ? 'This week' : period === 'month' ? 'This month' : 'Custom dates'
   return <>
-    <PageHeading eyebrow="MONDAY, 02 NOVEMBER 2026" title="Your business overview" desc="Here's what's happening with your business today." action={<Button icon={Plus} onClick={onAdd}>Create order</Button>}/>
-    <div className="welcome-strip"><div className="welcome-icon"><Sparkles size={19}/></div><div><b>Your business, at a glance.</b><span>Keep orders moving and stock levels healthy. Add your products, orders and expenses to start tracking your business.</span></div><button onClick={() => onNavigate('Reports')}>View business report <ArrowUpRight size={15}/></button></div>
-    <div className="section-head"><div><h2>Business overview</h2><span>Performance snapshot</span></div><button className="date-chip"><CalendarDays size={15}/> This month <ChevronDown size={14}/></button></div>
+    <PageHeading eyebrow="PARCEL MOVEMENT" title="Parcel overview" desc="Track outgoing dispatches and incoming returns. No sales figures — just parcel activity."/>
+    <div className="section-head"><div><h2>Parcel summary</h2><span>{periodLabel} · {range.begin.toLocaleDateString('en-IN')} – {range.end.toLocaleDateString('en-IN')}</span></div>
+      <div className="toolbar-actions"><select className="select-chip" value={period} onChange={e=>setPeriod(e.target.value)}><option value="day">Today</option><option value="week">This week</option><option value="month">This month</option><option value="custom">Custom dates</option></select>
+      {period==='custom'&&<><label className="date-pick">From <input type="date" value={from} onChange={e=>setFrom(e.target.value)}/></label><label className="date-pick">To <input type="date" value={to} min={from} onChange={e=>setTo(e.target.value)}/></label></>}
+    </div></div>
     <div className="stats-grid">
-      <Stat label="Total sales" value={money(delivered)} change="Recorded order value" trend="up" icon={IndianRupee} tone="blue" note="vs. last month"/>
-      <Stat label="Orders received" value={orders.length} change="Recorded orders" trend="up" icon={ShoppingBag} tone="violet" note="vs. last month"/>
-      <Stat label="Inventory value" value={money(stockValue)} change={low + ' low stock'} trend="down" icon={Boxes} tone="orange" note="at cost price"/>
-      <Stat label="Total expenses" value={money(spent)} change="This month" trend="neutral" icon={ReceiptText} tone="green" note="recorded expenses"/>
+      <div className="stat-card parcel-dashboard-card"><div className="stat-top"><span>Outgoing parcels</span><div className="stat-icon blue"><ArrowUpFromLine size={18}/></div></div><strong>{outgoing}</strong><div className="stat-foot"><span>Parcels dispatched</span><button className="text-link" onClick={()=>onNavigate('Outgoing')}>View records <ArrowUpRight size={14}/></button></div></div>
+      <div className="stat-card parcel-dashboard-card"><div className="stat-top"><span>Incoming parcels</span><div className="stat-icon green"><ArrowDownToLine size={18}/></div></div><strong>{incoming}</strong><div className="stat-foot"><span>RTO + customer returns</span><button className="text-link" onClick={()=>onNavigate('Incoming')}>View records <ArrowUpRight size={14}/></button></div></div>
     </div>
-    <div className="dashboard-grid"><section className="panel sales-panel"><div className="panel-head"><div><h3>Sales overview</h3><p>Revenue performance over time</p></div><button className="select-chip">Last 7 days <ChevronDown size={14}/></button></div><div className="empty-state">Sales trend will appear here after you record orders.</div></section>
-      <section className="panel channel-panel"><div className="panel-head"><div><h3>Order channels</h3><p>Where orders come from</p></div><MoreHorizontal size={19}/></div><div className="empty-state">Channel breakdown will appear after you record orders.</div></section></div>
-    <div className="bottom-grid"><section className="panel"><div className="panel-head"><div><h3>Recent orders</h3><p>Latest activity from your store</p></div><button className="text-link" onClick={() => onNavigate('Orders')}>View all <ArrowUpRight size={14}/></button></div><OrderTable orders={orders.slice(0,4)}/></section><section className="panel stock-panel"><div className="panel-head"><div><h3>Stock alerts</h3><p>Products that need attention</p></div><button className="text-link" onClick={() => onNavigate('Inventory')}>Inventory <ArrowUpRight size={14}/></button></div>{products.filter(p=>p.stock<=8).slice(0,4).map(p=><div className="stock-alert" key={p.id}><div className="product-thumb"><Package size={17}/></div><div className="stock-name"><b>{p.name}</b><span>{p.sku}</span></div><span className={'stock-count ' + (p.stock===0?'zero':'')}>{p.stock===0?'Out of stock':p.stock+' left'}</span></div>)}</section></div>
+    <div className="dashboard-grid">
+      <section className="panel"><div className="panel-head"><div><h3>Outgoing activity</h3><p>Dispatches in selected period</p></div><button className="text-link" onClick={()=>onNavigate('Outgoing')}>Open outgoing <ArrowUpRight size={14}/></button></div><div className="parcel-summary-number">{outgoing}</div></section>
+      <section className="panel"><div className="panel-head"><div><h3>Incoming activity</h3><p>RTO and customer returns in selected period</p></div><button className="text-link" onClick={()=>onNavigate('Incoming')}>Open incoming <ArrowUpRight size={14}/></button></div><div className="parcel-summary-number">{incoming}</div></section>
+    </div>
   </>
 }
 function Stat({ label, value, change, trend, icon: Icon, tone, note }) { return <div className="stat-card"><div className="stat-top"><span>{label}</span><div className={'stat-icon '+tone}><Icon size={18}/></div></div><strong>{value}</strong><div className="stat-foot"><span className={'trend '+trend}>{trend==='up'?<TrendingUp size={13}/>:trend==='down'?<CircleAlert size={13}/>:null}{change}</span><span>{note}</span></div></div> }
@@ -170,30 +183,29 @@ function Inventory({ products, onAdd, onScan, onEdit }) { return <>
 </> }
 function ParcelOperations({ onScan, parcelLogs, page, onDelete, onExport }) {
   const isOutgoing = page === 'Outgoing'
-  const [day, setDay] = useState(() => toInputDate(new Date()))
+  const [period, setPeriod] = useState('day')
+  const [from, setFrom] = useState(toInputDate(new Date()))
+  const [to, setTo] = useState(toInputDate(new Date()))
   const modes = isOutgoing
     ? [{ id: 'dispatch', title: 'Outgoing parcels', desc: 'Scan each parcel label when handing shipments to the courier.', icon: ArrowUpFromLine }]
     : [{ id: 'rto', title: 'RTO received', desc: 'Scan parcels returned by the courier as Return to Origin.', icon: ArrowDownToLine }, { id: 'return', title: 'Customer returns', desc: 'Scan parcels sent back by customers.', icon: Package }]
-  const isToday = day === toInputDate(new Date())
-  const dayLabel = isToday ? 'Today' : new Date(day + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
-  const dayLogs = parcelLogs.filter(x => toInputDate(new Date(x.createdAt)) === day && modes.some(m => m.id === x.mode))
+  const now = new Date()
+  const start = new Date(now); start.setHours(0,0,0,0)
+  const end = new Date(now); end.setHours(23,59,59,999)
+  if (period === 'week') start.setDate(start.getDate()-6)
+  if (period === 'month') start.setDate(1)
+  if (period === 'custom') { start.setTime(new Date(from+'T00:00:00').getTime()); end.setTime(new Date(to+'T23:59:59').getTime()) }
+  const selectedLogs = parcelLogs.filter(x => { const d=new Date(x.createdAt); return d>=start && d<=end && modes.some(m=>m.id===x.mode) })
+  const today = toInputDate(new Date())
+  const periodLabel = period==='day'?'Today':period==='week'?'This week':period==='month'?'This month':'Custom dates'
   return <>
-    <PageHeading eyebrow={isOutgoing ? 'PARCEL DISPATCH' : 'PARCEL RETURNS'} title={isOutgoing ? 'Outgoing parcels' : 'Incoming returns'} desc={isOutgoing ? 'Scan parcels sent out to customers and keep a daily dispatch count.' : 'Record returned parcels separately as RTO or customer returns.'} action={<Button variant="outline" icon={Download} onClick={onExport}>Export CSV</Button>}/>
-    <div className={'parcel-mode-grid ' + (isOutgoing ? 'single-parcel-mode' : '')}>
-      {modes.map(m => {
-        const count = dayLogs.filter(x => x.mode === m.id).length
-        return <section className="panel parcel-mode-card" key={m.id}>
-          <div className="parcel-card-top"><div className="movement-icon"><m.icon size={21}/></div><span className="parcel-today">{dayLabel.toUpperCase()}</span></div>
-          <h3>{m.title}</h3><p>{m.desc}</p>
-          <div className="parcel-card-bottom"><div className="parcel-count">{count}<small> parcels scanned {isToday ? 'today' : 'on this day'}</small></div><Button icon={ScanLine} onClick={() => onScan(m.id)}>Open scanner</Button></div>
-        </section>
-      })}
+    <PageHeading eyebrow={isOutgoing ? 'PARCEL DISPATCH' : 'PARCEL RECEIPTS'} title={isOutgoing ? 'Outgoing parcels' : 'Incoming parcels'} desc={isOutgoing ? 'Scan parcels handed to the courier and review dispatch history.' : 'Record RTO and customer-return parcels as incoming.'} action={<Button variant="outline" icon={Download} onClick={onExport}>Export CSV</Button>}/>
+    <div className="section-head"><div><h2>{periodLabel} summary</h2><span>{selectedLogs.length} parcel records</span></div><div className="toolbar-actions"><select className="select-chip" value={period} onChange={e=>setPeriod(e.target.value)}><option value="day">Today</option><option value="week">This week</option><option value="month">This month</option><option value="custom">Custom dates</option></select>{period==='custom'&&<><label className="date-pick">From <input type="date" value={from} onChange={e=>setFrom(e.target.value)}/></label><label className="date-pick">To <input type="date" min={from} value={to} onChange={e=>setTo(e.target.value)}/></label></>}</div></div>
+    <div className={'parcel-mode-grid '+(isOutgoing?'single-parcel-mode':'')}>
+      {modes.map(m=>{const count=selectedLogs.filter(x=>x.mode===m.id).length;return <section className="panel parcel-mode-card" key={m.id}><div className="parcel-card-top"><div className="movement-icon"><m.icon size={21}/></div><span className="parcel-today">{periodLabel.toUpperCase()}</span></div><h3>{m.title}</h3><p>{m.desc}</p><div className="parcel-card-bottom"><div className="parcel-count">{count}<small> parcels in {periodLabel.toLowerCase()}</small></div><Button icon={ScanLine} onClick={()=>onScan(m.id)}>Open scanner</Button></div></section>})}
     </div>
-    <section className="panel table-panel parcel-history">
-      <div className="table-toolbar"><div><h3>{isToday ? "Today's" : dayLabel} scan history</h3><p>{dayLogs.length} parcel{dayLogs.length === 1 ? '' : 's'} recorded</p></div><div className="toolbar-actions"><label className="date-pick"><CalendarDays size={14}/><input type="date" value={day} max={toInputDate(new Date())} onChange={e => setDay(e.target.value || toInputDate(new Date()))}/></label><span className="parcel-total">{dayLogs.length} TOTAL</span></div></div>
-      <div className="table-scroll"><table><thead><tr><th>TIME</th><th>PARCEL TYPE</th><th>BARCODE / AWB</th><th>CUSTOMER NAME</th><th/></tr></thead><tbody>
-        {dayLogs.map(x => <tr key={x.id}><td>{new Date(x.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</td><td><span className="channel-tag">{modeLabel(x.mode)}</span></td><td className="id-cell">{x.code}</td><td className="customer-cell">{x.customerName}</td><td><button className="row-action" title="Delete this scan" onClick={() => { if (window.confirm('Delete this scan?')) onDelete(x.id) }}><Trash2 size={15}/></button></td></tr>)}
-      </tbody></table>{!dayLogs.length && <Empty text={isToday ? 'No parcels scanned today yet.' : 'No parcels scanned on this day.'}/>}</div>
+    <section className="panel table-panel parcel-history"><div className="table-toolbar"><div><h3>{periodLabel} scan history</h3><p>{selectedLogs.length} parcel{selectedLogs.length===1?'':'s'} recorded</p></div><span className="parcel-total">{selectedLogs.length} TOTAL</span></div>
+      <div className="table-scroll"><table><thead><tr><th>DATE & TIME</th><th>PARCEL TYPE</th><th>BARCODE / AWB</th><th>CUSTOMER NAME</th><th/></tr></thead><tbody>{[...selectedLogs].sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)).map(x=><tr key={x.id}><td>{new Date(x.createdAt).toLocaleString('en-IN')}</td><td><span className="channel-tag">{modeLabel(x.mode)}</span></td><td className="id-cell">{x.code}</td><td className="customer-cell">{x.customerName}</td><td><button className="row-action" title="Delete this scan" onClick={()=>{if(window.confirm('Delete this scan?'))onDelete(x.id)}}><Trash2 size={15}/></button></td></tr>)}</tbody></table>{!selectedLogs.length&&<Empty text="No parcels recorded in this date range yet."/>}</div>
     </section>
   </>
 }
