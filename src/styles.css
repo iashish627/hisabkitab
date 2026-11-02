@@ -6,3 +6,5 @@
 @media print{.sidebar,.topbar,.heading-actions,.welcome-strip button{display:none!important}.main-area{margin:0}.page-wrap{padding:0}.panel,.stat-card{break-inside:avoid}}
 
 .parcel-mode-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:18px 0 16px}.parcel-mode-card{display:flex;flex-direction:column;align-items:flex-start;gap:10px}.parcel-mode-card h3{font:700 13px Manrope;margin:2px 0 0;color:#30394a}.parcel-mode-card p{font-size:10px;line-height:1.6;color:#8992a1;min-height:42px;margin:0 0 5px}.parcel-mode-card .btn{margin-top:auto}.status-rto-received{background:#edf2ff;color:#5275d1}.status-customer-return{background:#fff5e6;color:#c68b36}@media(max-width:820px){.parcel-mode-grid{grid-template-columns:1fr 1fr}}@media(max-width:540px){.parcel-mode-grid{grid-template-columns:1fr}}
+
+.parcel-count{font:800 25px Manrope;color:#263246;margin:2px 0 5px}.parcel-count small{font:500 10px 'DM Sans';color:#929baa}
