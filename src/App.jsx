@@ -19,7 +19,7 @@ function App() {
   const [page, setPage] = useState('Dashboard')
   const [mobileOpen, setMobileOpen] = useState(false)
   const [query, setQuery] = useState('')
-  const [products, setProducts] = useState(() => JSON.parse(localStorage.getItem('hk-products') || '[]'))
+  const [products, setProducts] = useState(() => { if (localStorage.getItem('hk-data-version') !== '2') { localStorage.removeItem('hk-products'); localStorage.removeItem('hk-orders'); localStorage.removeItem('hk-expenses'); localStorage.setItem('hk-data-version', '2') } return JSON.parse(localStorage.getItem('hk-products') || '[]') })
   const [orders, setOrders] = useState(() => JSON.parse(localStorage.getItem('hk-orders') || '[]'))
   const [expenses, setExpenses] = useState(() => JSON.parse(localStorage.getItem('hk-expenses') || '[]'))
   const [modal, setModal] = useState('')
