@@ -73,7 +73,7 @@ function App() {
         {page === 'Dashboard' && <Dashboard products={products} orders={orders} expenses={expenses} onNavigate={changePage} onAdd={() => setModal('order')}/>}
         {page === 'Inventory' && <Inventory products={filteredProducts} onAdd={() => setModal('product')} onScan={() => setModal('scanner')} onEdit={p => { setScanValue(p.barcode); setModal('movement') }}/>}
         {page === 'Orders' && <Orders orders={filteredOrders} onAdd={() => setModal('order')}/>}
-        {page === 'Incoming' && <ParcelOperations page={page} onScan={mode => { setParcelMode(mode); setScanValue(''); setModal('parcel-scanner') }} parcelLogs={parcelLogs} page={page} />}
+        {page === 'Incoming' && <ParcelOperations page={page} onScan={mode => { setParcelMode(mode); setScanValue(''); setModal('parcel-scanner') }} parcelLogs={parcelLogs} />}
         {page === 'Outgoing' && <ParcelOperations page={page} onScan={mode => { setParcelMode(mode); setScanValue(''); setModal('parcel-scanner') }} parcelLogs={parcelLogs} />}
         {page === 'Expenses' && <Expenses expenses={expenses} onAdd={() => setModal('expense')}/>}
         {page === 'Reports' && <Reports products={products} orders={orders} expenses={expenses} parcelLogs={parcelLogs}/>}
