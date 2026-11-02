@@ -6,10 +6,30 @@ import {
   ReceiptText, ChartNoAxesCombined, ScanLine, Search, Bell, Plus, ChevronDown,
   Menu, X, IndianRupee, TrendingUp, TrendingDown, Boxes, CircleAlert,
   MoreHorizontal, CalendarDays, Download, Filter, Camera, Keyboard, Check,
-  Clock3, Truck, Wallet, ArrowUpRight, ArrowDownRight, Sparkles, Tag
+  Clock3, Truck, Wallet, ArrowUpRight, ArrowDownRight, Sparkles, Tag, Trash2, Upload
 } from 'lucide-react'
 
 const money = n => '₹' + Number(n || 0).toLocaleString('en-IN')
+const toInputDate = d => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10)
+const modeLabel = m => m === 'dispatch' ? 'Outgoing' : m === 'rto' ? 'RTO' : 'Customer Return'
+const csvCell = v => '"' + String(v ?? '').replaceAll('"', '""') + '"'
+const downloadFile = (name, text, type) => {
+  const url = URL.createObjectURL(new Blob([text], { type }))
+  const a = document.createElement('a')
+  a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 1500)
+}
+const beep = ok => {
+  try {
+    navigator.vibrate?.(ok ? 60 : [80, 60, 80])
+    const Ctx = window.AudioContext || window.webkitAudioContext
+    if (!Ctx) return
+    const ctx = new Ctx(), o = ctx.createOscillator(), g = ctx.createGain()
+    o.frequency.value = ok ? 880 : 220; g.gain.value = 0.08
+    o.connect(g); g.connect(ctx.destination); o.start()
+    setTimeout(() => { o.stop(); ctx.close() }, ok ? 120 : 320)
+  } catch (e) { /* sound is optional */ }
+}
 const nav = [
   { label: 'Overview', items: [{ name: 'Dashboard', icon: LayoutDashboard }] },
   { label: 'Manage', items: [{ name: 'Orders', icon: ShoppingBag }, { name: 'Inventory', icon: Package }, { name: 'Incoming', icon: ArrowDownToLine }, { name: 'Outgoing', icon: ArrowUpFromLine }, { name: 'Barcode scanner', icon: ScanLine }] },
@@ -28,6 +48,10 @@ function App() {
   const [scanValue, setScanValue] = useState('')
   const [parcelMode, setParcelMode] = useState('dispatch')
   const [parcelLogs, setParcelLogs] = useState(() => JSON.parse(localStorage.getItem('hk-parcel-logs') || '[]'))
+  const parcelLogsRef = useRef(parcelLogs)
+  parcelLogsRef.current = parcelLogs
+  const [lastBackup, setLastBackup] = useState(() => localStorage.getItem('hk-last-backup') || '')
+  useEffect(() => { navigator.storage?.persist?.() }, [])
   useEffect(() => localStorage.setItem('hk-products', JSON.stringify(products)), [products])
   useEffect(() => localStorage.setItem('hk-orders', JSON.stringify(orders)), [orders])
   useEffect(() => localStorage.setItem('hk-expenses', JSON.stringify(expenses)), [expenses])
@@ -50,10 +74,40 @@ function App() {
     setModal(''); notify('Order created')
   }
   const processParcelScan = (code, mode, customerName) => {
-    if (!String(code || '').trim()) { notify('Scan the parcel barcode first'); return }
-    const entry = { id: Date.now(), code: String(code).trim(), customerName: String(customerName || '').trim() || 'Name not detected', mode, createdAt: new Date().toISOString() }
+    const clean = String(code || '').trim()
+    if (!clean) { notify('Scan the parcel barcode first'); return null }
+    const logs = parcelLogsRef.current
+    const isReturn = mode !== 'dispatch'
+    const dup = logs.find(x => x.code === clean && (isReturn ? x.mode !== 'dispatch' : x.mode === 'dispatch'))
+    if (dup) { notify('Duplicate: ' + clean + ' already scanned as ' + modeLabel(dup.mode)); return { duplicate: true } }
+    const entry = { id: Date.now() + Math.random(), code: clean, customerName: String(customerName || '').trim() || 'Name not detected', mode, createdAt: new Date().toISOString() }
+    parcelLogsRef.current = [entry, ...logs]
     setParcelLogs(prev => [entry, ...prev])
-    notify(mode === 'dispatch' ? 'Outgoing parcel recorded' : mode === 'rto' ? 'RTO parcel recorded' : 'Customer return recorded')
+    const unmatched = isReturn && !logs.some(x => x.code === clean && x.mode === 'dispatch')
+    notify(modeLabel(mode) + ' recorded' + (unmatched ? ' (no matching outgoing record found)' : ''))
+    return { id: entry.id }
+  }
+  const updateParcelName = (id, name) => setParcelLogs(prev => prev.map(x => x.id === id ? { ...x, customerName: name } : x))
+  const deleteParcel = id => { setParcelLogs(prev => prev.filter(x => x.id !== id)); notify('Scan deleted') }
+  const exportParcelsCsv = () => {
+    if (!parcelLogs.length) { notify('No parcel scans to export yet'); return }
+    const rows = [['Date', 'Time', 'Type', 'AWB / Barcode', 'Customer name'], ...[...parcelLogs].reverse().map(x => { const d = new Date(x.createdAt); return [d.toLocaleDateString('en-IN'), d.toLocaleTimeString('en-IN'), modeLabel(x.mode), x.code, x.customerName] })]
+    downloadFile('parcels-' + toInputDate(new Date()) + '.csv', '\ufeff' + rows.map(r => r.map(csvCell).join(',')).join('\n'), 'text/csv;charset=utf-8')
+    notify('CSV downloaded')
+  }
+  const backupAll = () => {
+    const stamp = new Date().toISOString()
+    downloadFile('hisabkitab-backup-' + toInputDate(new Date()) + '.json', JSON.stringify({ app: 'hisabkitab', version: 1, exportedAt: stamp, products, orders, expenses, parcelLogs }, null, 2), 'application/json')
+    localStorage.setItem('hk-last-backup', stamp); setLastBackup(stamp); notify('Backup downloaded')
+  }
+  const restoreAll = async file => {
+    try {
+      const data = JSON.parse(await file.text())
+      if (data.app !== 'hisabkitab' || !Array.isArray(data.parcelLogs)) throw new Error('not a backup')
+      if (!window.confirm('Restore this backup? Current data on this device will be replaced.')) return
+      setProducts(data.products || []); setOrders(data.orders || []); setExpenses(data.expenses || []); setParcelLogs(data.parcelLogs)
+      notify('Backup restored')
+    } catch (e) { notify('This file is not a valid HisabKitab backup') }
   }
   const recordMovement = (kind, productId, qty) => {
     setProducts(prev => prev.map(p => p.id === Number(productId) ? { ...p, stock: Math.max(0, p.stock + (kind === 'Incoming' ? qty : -qty)) } : p))
@@ -73,13 +127,13 @@ function App() {
         {page === 'Dashboard' && <Dashboard products={products} orders={orders} expenses={expenses} onNavigate={changePage} onAdd={() => setModal('order')}/>}
         {page === 'Inventory' && <Inventory products={filteredProducts} onAdd={() => setModal('product')} onScan={() => setModal('scanner')} onEdit={p => { setScanValue(p.barcode); setModal('movement') }}/>}
         {page === 'Orders' && <Orders orders={filteredOrders} onAdd={() => setModal('order')}/>}
-        {page === 'Incoming' && <ParcelOperations page={page} onScan={mode => { setParcelMode(mode); setScanValue(''); setModal('parcel-scanner') }} parcelLogs={parcelLogs} />}
-        {page === 'Outgoing' && <ParcelOperations page={page} onScan={mode => { setParcelMode(mode); setScanValue(''); setModal('parcel-scanner') }} parcelLogs={parcelLogs} />}
+        {page === 'Incoming' && <ParcelOperations page={page} onScan={mode => { setParcelMode(mode); setScanValue(''); setModal('parcel-scanner') }} parcelLogs={parcelLogs} onDelete={deleteParcel} onExport={exportParcelsCsv} />}
+        {page === 'Outgoing' && <ParcelOperations page={page} onScan={mode => { setParcelMode(mode); setScanValue(''); setModal('parcel-scanner') }} parcelLogs={parcelLogs} onDelete={deleteParcel} onExport={exportParcelsCsv} />}
         {page === 'Expenses' && <Expenses expenses={expenses} onAdd={() => setModal('expense')}/>}
-        {page === 'Reports' && <Reports products={products} orders={orders} expenses={expenses} parcelLogs={parcelLogs}/>}
+        {page === 'Reports' && <Reports products={products} orders={orders} expenses={expenses} parcelLogs={parcelLogs} lastBackup={lastBackup} onBackup={backupAll} onRestore={restoreAll} onExportParcels={exportParcelsCsv}/>}
       </div>
     </main>
-    {modal && <Modal type={modal} products={products} scanValue={scanValue} setScanValue={setScanValue} onClose={() => setModal('')} onProduct={addProduct} onExpense={addExpense} onOrder={addOrder} onMovement={recordMovement} onParcelScan={processParcelScan} parcelMode={parcelMode} notify={notify}/>}
+    {modal && <Modal type={modal} products={products} scanValue={scanValue} setScanValue={setScanValue} onClose={() => setModal('')} onProduct={addProduct} onExpense={addExpense} onOrder={addOrder} onMovement={recordMovement} onParcelScan={processParcelScan} onParcelName={updateParcelName} parcelMode={parcelMode} notify={notify}/>}
     {toast && <div className="toast"><Check size={17}/>{toast}</div>}
   </div>
 }
@@ -114,32 +168,44 @@ function Inventory({ products, onAdd, onScan, onEdit }) { return <>
   <div className="stats-grid compact-stats"><Stat label="Total products" value={products.length} change="Across categories" trend="neutral" icon={Package} tone="blue" note="active SKUs"/><Stat label="Units in stock" value={products.reduce((s,p)=>s+p.stock,0)} change="Available" trend="up" icon={Boxes} tone="violet" note="total quantity"/><Stat label="Low stock items" value={products.filter(p=>p.stock>0&&p.stock<=8).length} change="Needs attention" trend="down" icon={CircleAlert} tone="orange" note="8 units or less"/><Stat label="Out of stock" value={products.filter(p=>p.stock===0).length} change="Restock needed" trend="down" icon={Package} tone="green" note="unavailable items"/></div>
   <section className="panel table-panel"><div className="table-toolbar"><div><h3>All products <span className="count-pill">{products.length}</span></h3><p>Your product catalogue and stock status</p></div><div className="toolbar-actions"><button className="select-chip"><Filter size={14}/> Filter <ChevronDown size={14}/></button><button className="select-chip"><Download size={14}/> Export</button></div></div><ProductTable products={products} onEdit={onEdit}/></section>
 </> }
-function ParcelOperations({ onScan, parcelLogs, page }) {
+function ParcelOperations({ onScan, parcelLogs, page, onDelete, onExport }) {
   const isOutgoing = page === 'Outgoing'
+  const [day, setDay] = useState(() => toInputDate(new Date()))
   const modes = isOutgoing
     ? [{ id: 'dispatch', title: 'Outgoing parcels', desc: 'Scan each parcel label when handing shipments to the courier.', icon: ArrowUpFromLine }]
     : [{ id: 'rto', title: 'RTO received', desc: 'Scan parcels returned by the courier as Return to Origin.', icon: ArrowDownToLine }, { id: 'return', title: 'Customer returns', desc: 'Scan parcels sent back by customers.', icon: Package }]
-  const today = new Date().toDateString()
-  const todayLogs = parcelLogs.filter(x => new Date(x.createdAt).toDateString() === today && modes.some(m => m.id === x.mode))
+  const isToday = day === toInputDate(new Date())
+  const dayLabel = isToday ? 'Today' : new Date(day + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+  const dayLogs = parcelLogs.filter(x => toInputDate(new Date(x.createdAt)) === day && modes.some(m => m.id === x.mode))
   return <>
-    <PageHeading eyebrow={isOutgoing ? 'PARCEL DISPATCH' : 'PARCEL RETURNS'} title={isOutgoing ? 'Outgoing parcels' : 'Incoming returns'} desc={isOutgoing ? 'Scan parcels sent out to customers and keep a daily dispatch count.' : 'Record returned parcels separately as RTO or customer returns.'}/>
+    <PageHeading eyebrow={isOutgoing ? 'PARCEL DISPATCH' : 'PARCEL RETURNS'} title={isOutgoing ? 'Outgoing parcels' : 'Incoming returns'} desc={isOutgoing ? 'Scan parcels sent out to customers and keep a daily dispatch count.' : 'Record returned parcels separately as RTO or customer returns.'} action={<Button variant="outline" icon={Download} onClick={onExport}>Export CSV</Button>}/>
     <div className={'parcel-mode-grid ' + (isOutgoing ? 'single-parcel-mode' : '')}>
       {modes.map(m => {
-        const count = todayLogs.filter(x => x.mode === m.id).length
+        const count = dayLogs.filter(x => x.mode === m.id).length
         return <section className="panel parcel-mode-card" key={m.id}>
-          <div className="parcel-card-top"><div className="movement-icon"><m.icon size={21}/></div><span className="parcel-today">TODAY</span></div>
+          <div className="parcel-card-top"><div className="movement-icon"><m.icon size={21}/></div><span className="parcel-today">{dayLabel.toUpperCase()}</span></div>
           <h3>{m.title}</h3><p>{m.desc}</p>
-          <div className="parcel-card-bottom"><div className="parcel-count">{count}<small> parcels scanned today</small></div><Button icon={ScanLine} onClick={() => onScan(m.id)}>Open scanner</Button></div>
+          <div className="parcel-card-bottom"><div className="parcel-count">{count}<small> parcels scanned {isToday ? 'today' : 'on this day'}</small></div><Button icon={ScanLine} onClick={() => onScan(m.id)}>Open scanner</Button></div>
         </section>
       })}
     </div>
     <section className="panel table-panel parcel-history">
-      <div className="table-toolbar"><div><h3>Today's scan history</h3><p>{todayLogs.length} parcel{todayLogs.length===1?'':'s'} recorded today</p></div><span className="parcel-total">{todayLogs.length} TOTAL</span></div>
-      <div className="table-scroll"><table><thead><tr><th>TIME</th><th>PARCEL TYPE</th><th>BARCODE / AWB</th><th>CUSTOMER NAME</th></tr></thead><tbody>
-        {todayLogs.map(x=><tr key={x.id}><td>{new Date(x.createdAt).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</td><td><span className="channel-tag">{x.mode==='dispatch'?'Outgoing':x.mode==='rto'?'RTO':'Customer Return'}</span></td><td className="id-cell">{x.code}</td><td className="customer-cell">{x.customerName}</td></tr>)}
-      </tbody></table>{!todayLogs.length&&<Empty text="No parcels scanned today yet."/>}</div>
+      <div className="table-toolbar"><div><h3>{isToday ? "Today's" : dayLabel} scan history</h3><p>{dayLogs.length} parcel{dayLogs.length === 1 ? '' : 's'} recorded</p></div><div className="toolbar-actions"><label className="date-pick"><CalendarDays size={14}/><input type="date" value={day} max={toInputDate(new Date())} onChange={e => setDay(e.target.value || toInputDate(new Date()))}/></label><span className="parcel-total">{dayLogs.length} TOTAL</span></div></div>
+      <div className="table-scroll"><table><thead><tr><th>TIME</th><th>PARCEL TYPE</th><th>BARCODE / AWB</th><th>CUSTOMER NAME</th><th/></tr></thead><tbody>
+        {dayLogs.map(x => <tr key={x.id}><td>{new Date(x.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</td><td><span className="channel-tag">{modeLabel(x.mode)}</span></td><td className="id-cell">{x.code}</td><td className="customer-cell">{x.customerName}</td><td><button className="row-action" title="Delete this scan" onClick={() => { if (window.confirm('Delete this scan?')) onDelete(x.id) }}><Trash2 size={15}/></button></td></tr>)}
+      </tbody></table>{!dayLogs.length && <Empty text={isToday ? 'No parcels scanned today yet.' : 'No parcels scanned on this day.'}/>}</div>
     </section>
   </>
+}
+function BackupPanel({ lastBackup, parcelCount, onBackup, onRestore, onExportParcels }) {
+  const fileRef = useRef(null)
+  const stale = parcelCount > 0 && (!lastBackup || Date.now() - new Date(lastBackup).getTime() > 7 * 86400000)
+  return <section className="panel backup-panel">
+    <div><h3>Backup and record safety</h3><p>Your records are stored on this device's browser only. Download a backup regularly so nothing is lost if the phone or browser data is cleared, and to move data to another phone.</p></div>
+    <div className="backup-meta"><span>Parcel scans saved: <b>{parcelCount}</b></span><span>Last backup: <b>{lastBackup ? new Date(lastBackup).toLocaleString('en-IN') : 'Never'}</b></span></div>
+    {stale && <div className="backup-warn">{lastBackup ? 'Last backup is more than 7 days old. ' : 'No backup taken yet. '}Download one now.</div>}
+    <div className="backup-actions"><Button icon={Download} onClick={onBackup}>Download full backup</Button><Button variant="outline" icon={Upload} onClick={() => fileRef.current?.click()}>Restore from backup</Button><Button variant="outline" icon={Download} onClick={onExportParcels}>Export parcels (CSV)</Button><input ref={fileRef} type="file" accept="application/json,.json" hidden onChange={e => { const f = e.target.files?.[0]; if (f) onRestore(f); e.target.value = '' }}/></div>
+  </section>
 }
 function Orders({ orders, onAdd }) { return <><PageHeading eyebrow="SALES MANAGEMENT" title="Orders" desc="Track orders from every selling channel." action={<Button icon={Plus} onClick={onAdd}>Create order</Button>}/><div className="stats-grid compact-stats"><Stat label="All orders" value={orders.length} change="All channels" trend="neutral" icon={ShoppingBag} tone="blue" note="in this workspace"/><Stat label="Processing" value={orders.filter(o=>o.status==='Processing').length} change="Action needed" trend="neutral" icon={Clock3} tone="orange" note="to be packed"/><Stat label="Shipped" value={orders.filter(o=>o.status==='Shipped').length} change="In transit" trend="neutral" icon={Truck} tone="violet" note="on the way"/><Stat label="Delivered" value={orders.filter(o=>o.status==='Delivered').length} change="Completed" trend="up" icon={Check} tone="green" note="successfully delivered"/></div><section className="panel table-panel"><div className="table-toolbar"><div><h3>All orders <span className="count-pill">{orders.length}</span></h3><p>Review and manage your recent orders</p></div><button className="select-chip"><Filter size={14}/> Filter</button></div><OrderTable orders={orders}/></section></> }
 function OrderTable({ orders }) { return <div className="table-scroll"><table><thead><tr><th>ORDER ID</th><th>CUSTOMER</th><th>DATE</th><th>CHANNEL</th><th>AMOUNT</th><th>STATUS</th></tr></thead><tbody>{orders.map(o=><tr key={o.id}><td className="id-cell">{o.id}</td><td><b className="customer-cell">{o.customer}</b></td><td>{o.date}</td><td><span className="channel-tag">{o.channel}</span></td><td className="amount-cell">{money(o.amount)}</td><td><Status status={o.status}/></td></tr>)}</tbody></table>{!orders.length&&<Empty text="No orders match your search."/>}</div> }
@@ -150,7 +216,7 @@ function Empty({ text }) { return <div className="empty-state"><Package size={24
 function Movement({ products, kind, onAdd }) { return <><PageHeading eyebrow="STOCK MOVEMENT" title={kind+' stock'} desc={kind==='Incoming'?'Record purchases, returns and restocked products.':'Record sales, damaged items and stock dispatched.'} action={<Button icon={Plus} onClick={onAdd}>Record {kind.toLowerCase()}</Button>}/><div className="movement-banner"><div className="movement-icon"><KindIcon kind={kind}/></div><div><b>{kind==='Incoming'?'Stock coming into your business':'Stock leaving your business'}</b><span>{kind==='Incoming'?'Keep purchase and restock quantities up to date.':'Keep sales, dispatches and damaged stock accounted for.'}</span></div></div><section className="panel table-panel"><div className="table-toolbar"><div><h3>Current stock</h3><p>Select a product to review its available quantity</p></div></div><ProductTable products={products} onEdit={p=>onAdd(p)}/></section></> }
 function KindIcon({kind}) { return kind==='Incoming'?<ArrowDownToLine size={20}/>:<ArrowUpFromLine size={20}/> }
 function Expenses({ expenses, onAdd }) { return <><PageHeading eyebrow="COST MANAGEMENT" title="Expenses" desc="Record business spending and keep costs under control." action={<Button icon={Plus} onClick={onAdd}>Add expense</Button>}/><div className="stats-grid compact-stats"><Stat label="Total expenses" value={money(expenses.reduce((s,e)=>s+e.amount,0))} change="Recorded" trend="neutral" icon={IndianRupee} tone="blue" note="all recorded expenses"/><Stat label="Transactions" value={expenses.length} change="Entries" trend="neutral" icon={ReceiptText} tone="violet" note="expense records"/><Stat label="Largest expense" value={money(Math.max(0,...expenses.map(e=>e.amount)))} change="Single entry" trend="neutral" icon={Wallet} tone="orange" note="highest amount"/><Stat label="Categories" value={new Set(expenses.map(e=>e.category)).size} change="Expense types" trend="neutral" icon={Tag} tone="green" note="being tracked"/></div><section className="panel table-panel"><div className="table-toolbar"><div><h3>Expense history</h3><p>All recorded business expenses</p></div><button className="select-chip"><Download size={14}/> Export</button></div><div className="table-scroll"><table><thead><tr><th>DESCRIPTION</th><th>CATEGORY</th><th>DATE</th><th>AMOUNT</th></tr></thead><tbody>{expenses.map(e=><tr key={e.id}><td><b className="customer-cell">{e.title}</b></td><td><span className="channel-tag">{e.category}</span></td><td>{e.date}</td><td className="amount-cell">{money(e.amount)}</td></tr>)}</tbody></table></div></section></> }
-function Reports({ products, orders, expenses, parcelLogs = [] }) {
+function Reports({ products, orders, expenses, parcelLogs = [], lastBackup, onBackup, onRestore, onExportParcels }) {
   const [period, setPeriod] = useState('day')
   const now = new Date()
   const start = new Date(now)
@@ -189,20 +255,44 @@ function Reports({ products, orders, expenses, parcelLogs = [] }) {
       <div className="analytics-breakdown"><div><span className="break-dot outgoing-dot"/>Outgoing <b>{outgoing}</b></div><div><span className="break-dot rto-dot"/>RTO <b>{rto}</b></div><div><span className="break-dot return-dot"/>Customer returns <b>{customerReturns}</b></div></div>
       {!logs.length&&<div className="analytics-empty">No parcel scans recorded in this period yet. Scan parcels in Outgoing or Incoming to build your reports.</div>}
     </section>
+    <BackupPanel lastBackup={lastBackup} parcelCount={parcelLogs.length} onBackup={onBackup} onRestore={onRestore} onExportParcels={onExportParcels}/>
     <div className="stats-grid compact-stats"><Stat label="Order value" value={money(sales)} change="All orders" trend="up" icon={IndianRupee} tone="blue" note="gross order value"/><Stat label="Expenses" value={money(costs)} change="Recorded" trend="neutral" icon={ReceiptText} tone="orange" note="business costs"/><Stat label="Net order value*" value={money(sales-costs)} change="Estimate" trend={sales>=costs?'up':'down'} icon={TrendingUp} tone="green" note="sales less expenses"/><Stat label="Stock at cost" value={money(products.reduce((sum,p)=>sum+p.stock*p.cost,0))} change="Current" trend="neutral" icon={Boxes} tone="violet" note="inventory valuation"/></div>
     <div className="report-note">*Indicative calculation only. Taxes, marketplace fees, refunds and cost of goods sold are not included. Return ratio is a simple operational indicator, not a final return rate for a matched order cohort.</div>
     <section className="panel report-panel"><h3>Inventory health</h3><p>Current product availability</p>{[['Healthy stock',products.filter(p=>p.stock>8).length,'#2caa78'],['Low stock',products.filter(p=>p.stock>0&&p.stock<=8).length,'#e5a13b'],['Out of stock',products.filter(p=>p.stock===0).length,'#e16b6b']].map(([label,n,color])=><div className="report-row" key={label}><span>{label}</span><div className="report-track"><i style={{width:(products.length?n/products.length*100:0)+'%',background:color}}/></div><b>{n}</b></div>)}</section>
   </>
 }
-function Modal({ type, products, scanValue, setScanValue, onClose, onProduct, onExpense, onOrder, onMovement, onParcelScan, parcelMode, notify }) {
+function Modal({ type, products, scanValue, setScanValue, onClose, onProduct, onExpense, onOrder, onMovement, onParcelScan, onParcelName, parcelMode, notify }) {
   const [form,setForm]=useState({name:'',sku:'',category:'General',stock:'10',price:'199',cost:'50',barcode:scanValue,customer:'',amount:'',channel:'Direct',title:'',expenseCategory:'Packaging',productId:products[0]?.id||'',qty:'1',awb:''})
-  const [scanning,setScanning]=useState(false), [ocrName,setOcrName]=useState(''), [ocrBusy,setOcrBusy]=useState(false), videoRef=useRef(null), controlsRef=useRef(null)
-  useEffect(()=>{ if(type!=='scanner' && type!=='parcel-scanner') return; let active=true; const start=async()=>{try{const reader=new BrowserMultiFormatReader();const controls=await reader.decodeFromVideoDevice(undefined,videoRef.current,(result)=>{if(result&&active){const code=result.getText();setScanValue(code);setForm(f=>({...f,barcode:code}));setScanning(false);if(type==='parcel-scanner'){const video=videoRef.current;const canvas=document.createElement('canvas');canvas.width=video?.videoWidth||640;canvas.height=video?.videoHeight||480;canvas.getContext('2d')?.drawImage(video,0,0,canvas.width,canvas.height);setOcrBusy(true);Tesseract.recognize(canvas.toDataURL('image/png'),'eng').then(({data})=>{const lines=(data.text||'').split('\\n').map(x=>x.trim()).filter(Boolean);const candidate=lines.find(x=>/^[A-Z][A-Z .'-]{4,}$/.test(x)&&!/(SHIP|DELIVER|RETURN|ADDRESS|MOBILE|PHONE|PINCODE|AWB|ORDER)/i.test(x));setOcrName(candidate||'')}).catch(()=>notify('Name could not be read. Enter it manually.')).finally(()=>setOcrBusy(false))}else{notify('Barcode detected: '+code)}}});controlsRef.current=controls;setScanning(true)}catch(e){notify('Camera unavailable. Enter barcode manually.')}}; start(); return()=>{active=false;controlsRef.current?.stop() }},[type])
+  const [scanning,setScanning]=useState(false), [session,setSession]=useState([]), [readName,setReadName]=useState(true), videoRef=useRef(null), controlsRef=useRef(null), lockRef=useRef(false), lastRef=useRef({code:'',t:0}), ocrChain=useRef(Promise.resolve()), parcelRef=useRef({})
+  parcelRef.current={onParcelScan,onParcelName,parcelMode,readName}
+  const captureFrame=()=>{const v=videoRef.current; if(!v||!v.videoWidth) return null; const c=document.createElement('canvas'); c.width=v.videoWidth; c.height=v.videoHeight; c.getContext('2d')?.drawImage(v,0,0,c.width,c.height); return c.toDataURL('image/png')}
+  const saveParcel=(code,frame)=>{
+    const {onParcelScan:save,onParcelName:rename,parcelMode:mode,readName:wantName}=parcelRef.current
+    const res=save(code,mode,'')
+    if(!res) return
+    beep(!res.duplicate)
+    if(res.duplicate){setSession(s=>[{key:Math.random(),code,state:'duplicate'},...s]);return}
+    setSession(s=>[{key:res.id,code,state:'saved',name:''},...s])
+    if(wantName&&frame){ocrChain.current=ocrChain.current.then(()=>Tesseract.recognize(frame,'eng')).then(({data})=>{const lines=(data.text||'').split('\n').map(x=>x.trim()).filter(Boolean);const candidate=lines.find(x=>/^[A-Z][A-Z .'-]{4,}$/.test(x)&&!/(SHIP|DELIVER|RETURN|ADDRESS|MOBILE|PHONE|PINCODE|AWB|ORDER)/i.test(x));if(candidate){rename(res.id,candidate);setSession(s=>s.map(x=>x.key===res.id?{...x,name:candidate}:x))}}).catch(()=>{})}
+  }
+  const saveManual=()=>{const c=String(scanValue||'').trim(); if(!c){notify('Enter or scan a barcode first');return} saveParcel(c,null); setScanValue('')}
+  useEffect(()=>{ if(type!=='scanner' && type!=='parcel-scanner') return; let active=true; const start=async()=>{try{const reader=new BrowserMultiFormatReader();const controls=await reader.decodeFromVideoDevice(undefined,videoRef.current,(result)=>{if(!result||!active||lockRef.current) return;const code=result.getText();if(type==='parcel-scanner'){const now=Date.now();if(lastRef.current.code===code&&now-lastRef.current.t<6000){lastRef.current.t=now;return};lastRef.current={code,t:now};lockRef.current=true;saveParcel(code,parcelRef.current.readName?captureFrame():null);setTimeout(()=>{lockRef.current=false},1200)}else{lockRef.current=true;setScanValue(code);setForm(f=>({...f,barcode:code}));notify('Barcode detected: '+code)}});if(!active){controls.stop();return};controlsRef.current=controls;setScanning(true)}catch(e){notify('Camera unavailable. Enter barcode manually.')}}; start(); return()=>{active=false;controlsRef.current?.stop() }},[type])
   const update=(k,v)=>setForm(f=>({...f,[k]:v}))
   const title=type==='parcel-scanner'?(parcelMode==='dispatch'?'Scan outgoing parcel':parcelMode==='rto'?'Scan RTO parcel':'Scan customer return'):type==='product'?'Add new product':type==='expense'?'Add business expense':type==='order'?'Create new order':type==='scanner'?'Scan product barcode':type==='movement-in'?'Record incoming stock':type==='movement-out'?'Record outgoing stock':'Adjust stock'
   const submit=e=>{e.preventDefault(); if(type==='product')onProduct(form); if(type==='expense')onExpense({title:form.title,category:form.expenseCategory,amount:form.amount}); if(type==='order')onOrder({customer:form.customer,amount:Number(form.amount),channel:form.channel,awb:form.awb,productId:form.productId,qty:form.qty}); if(type.startsWith('movement'))onMovement(type==='movement-out'?'Outgoing':'Incoming',form.productId,Number(form.qty))}
   return <div className="modal-backdrop" onMouseDown={e=>e.target===e.currentTarget&&onClose()}><div className="modal"><div className="modal-head"><div><span className="eyebrow">HISABKITAB WORKSPACE</span><h2>{title}</h2></div><button className="icon-btn" onClick={onClose}><X size={19}/></button></div>
-    {(type==='scanner'||type==='parcel-scanner')?<div className="scanner-body"><div className="camera-box"><video ref={videoRef}/><div className="scan-frame"><i/></div>{!scanning&&<div className="camera-overlay"><Camera size={25}/><span>Starting camera…</span></div>}</div><p className="form-hint">Keep the full courier label in view. Barcode is scanned and OCR tries to read the printed customer name. Verify it before saving.</p><label className="field-label">Barcode / AWB<input value={scanValue} onChange={e=>setScanValue(e.target.value)} placeholder="Scan or enter barcode"/></label>{type==='parcel-scanner'&&<><label className="field-label">Customer name {ocrBusy?'— reading label…':''}<input value={ocrName} onChange={e=>setOcrName(e.target.value)} placeholder="Name detected by OCR; edit if needed"/></label><p className="form-hint">OCR may not identify every label correctly. Verify the name before saving.</p></>}<Button onClick={()=>{if(type==='parcel-scanner'){onParcelScan(scanValue,parcelMode,ocrName);onClose()}else{onClose();notify(scanValue?'Barcode saved for lookup':'Scanner closed')}}}> {type==='parcel-scanner'?'Save parcel':'Use this barcode'}</Button></div>
+    {(type==='scanner'||type==='parcel-scanner')?<div className="scanner-body"><div className="camera-box"><video ref={videoRef} muted playsInline/><div className="scan-frame"><i/></div>{!scanning&&<div className="camera-overlay"><Camera size={25}/><span>Starting camera…</span></div>}</div>
+      {type==='parcel-scanner'?<>
+        <div className="session-bar"><div className="session-count"><b>{session.filter(x=>x.state==='saved').length}</b><span>saved in this session</span></div><label className="ocr-toggle"><input type="checkbox" checked={readName} onChange={e=>setReadName(e.target.checked)}/> Read customer name (slower)</label></div>
+        <p className="form-hint">Each parcel is saved automatically as soon as its barcode is detected. Show the next parcel — the scanner stays on. Tap Done when finished.</p>
+        <label className="field-label">Barcode / AWB (manual entry)<input value={scanValue} onChange={e=>setScanValue(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();saveManual()}}} placeholder="Type or paste AWB, press Enter"/></label>
+        <div className="session-actions"><Button variant="outline" onClick={saveManual}>Add manually</Button><Button onClick={onClose}>Done</Button></div>
+        {session.length>0&&<div className="session-list">{session.slice(0,8).map(x=><div key={x.key} className={'session-row '+x.state}><b>{x.code}</b><span>{x.state==='duplicate'?'Duplicate - not added':(x.name||'Saved')}</span></div>)}</div>}
+      </>:<>
+        <p className="form-hint">Hold the product barcode in front of the camera.</p>
+        <label className="field-label">Barcode<input value={scanValue} onChange={e=>setScanValue(e.target.value)} placeholder="Scan or enter barcode"/></label>
+        <Button onClick={()=>{onClose();notify(scanValue?'Barcode saved for lookup':'Scanner closed')}}>Use this barcode</Button>
+      </>}</div>
     :<form className="modal-form" onSubmit={submit}>
       {type==='product'&&<><Field label="Product name" value={form.name} onChange={v=>update('name',v)} required/><div className="form-row"><Field label="SKU" value={form.sku} onChange={v=>update('sku',v)} required/><Field label="Category" value={form.category} onChange={v=>update('category',v)}/></div><div className="form-row"><Field label="Selling price (₹)" value={form.price} onChange={v=>update('price',v)} type="number" required/><Field label="Cost price (₹)" value={form.cost} onChange={v=>update('cost',v)} type="number" required/></div><div className="form-row"><Field label="Opening stock" value={form.stock} onChange={v=>update('stock',v)} type="number" required/><Field label="Barcode" value={form.barcode} onChange={v=>update('barcode',v)}/></div></>}
       {type==='expense'&&<><Field label="Expense description" value={form.title} onChange={v=>update('title',v)} placeholder="e.g. Packaging material" required/><div className="form-row"><Field label="Amount (₹)" value={form.amount} onChange={v=>update('amount',v)} type="number" required/><label className="field-label">Category<select value={form.expenseCategory} onChange={e=>update('expenseCategory',e.target.value)}><option>Packaging</option><option>Shipping</option><option>Raw material</option><option>Marketing</option><option>Other</option></select></label></div></>}
