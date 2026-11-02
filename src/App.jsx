@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { BrowserMultiFormatReader } from '@zxing/browser'
+import Tesseract from 'tesseract.js'
 import {
   LayoutDashboard, Package, ShoppingBag, ArrowDownToLine, ArrowUpFromLine,
   ReceiptText, ChartNoAxesCombined, ScanLine, Search, Bell, Plus, ChevronDown,
@@ -26,9 +27,11 @@ function App() {
   const [toast, setToast] = useState('')
   const [scanValue, setScanValue] = useState('')
   const [parcelMode, setParcelMode] = useState('dispatch')
+  const [parcelLogs, setParcelLogs] = useState(() => JSON.parse(localStorage.getItem('hk-parcel-logs') || '[]'))
   useEffect(() => localStorage.setItem('hk-products', JSON.stringify(products)), [products])
   useEffect(() => localStorage.setItem('hk-orders', JSON.stringify(orders)), [orders])
   useEffect(() => localStorage.setItem('hk-expenses', JSON.stringify(expenses)), [expenses])
+  useEffect(() => localStorage.setItem('hk-parcel-logs', JSON.stringify(parcelLogs)), [parcelLogs])
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(''), 2600); return () => clearTimeout(t) }, [toast])
   const notify = msg => setToast(msg)
   const changePage = p => { setPage(p); setMobileOpen(false); setQuery('') }
@@ -46,21 +49,11 @@ function App() {
     setOrders(prev => [{ ...data, id: 'HK-' + (1050 + prev.length), qty: Number(data.qty || 1), productId: data.productId ? Number(data.productId) : null, awb: data.awb?.trim() || '', date: new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }), items: 1, status: 'Processing' }, ...prev])
     setModal(''); notify('Order created')
   }
-  const processParcelScan = (code, mode) => {
-    const order = orders.find(o => String(o.awb || '').toLowerCase() === String(code).trim().toLowerCase() || String(o.id).toLowerCase() === String(code).trim().toLowerCase())
-    if (!order) { notify('No order found for this AWB / barcode'); return }
-    if (mode === 'dispatch') {
-      if (order.status === 'Shipped' || order.status === 'Delivered') { notify('This parcel is already dispatched'); return }
-      setOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: 'Shipped', dispatchedAt: new Date().toISOString() } : o))
-      if (order.productId) setProducts(prev => prev.map(p => p.id === order.productId ? { ...p, stock: Math.max(0, p.stock - Number(order.qty || 1)) } : p))
-      notify('Parcel dispatched: ' + order.id)
-    } else {
-      const nextStatus = mode === 'rto' ? 'RTO Received' : 'Customer Return'
-      if (order.status === 'RTO Received' || order.status === 'Customer Return') { notify('Return already recorded for this order'); return }
-      if (order.productId) setProducts(prev => prev.map(p => p.id === order.productId ? { ...p, stock: p.stock + Number(order.qty || 1) } : p))
-      setOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: nextStatus, returnedAt: new Date().toISOString() } : o))
-      notify(nextStatus + ': ' + order.id + ' — stock updated')
-    }
+  const processParcelScan = (code, mode, customerName) => {
+    if (!String(code || '').trim()) { notify('Scan the parcel barcode first'); return }
+    const entry = { id: Date.now(), code: String(code).trim(), customerName: String(customerName || '').trim() || 'Name not detected', mode, createdAt: new Date().toISOString() }
+    setParcelLogs(prev => [entry, ...prev])
+    notify(mode === 'dispatch' ? 'Outgoing parcel recorded' : mode === 'rto' ? 'RTO parcel recorded' : 'Customer return recorded')
   }
   const recordMovement = (kind, productId, qty) => {
     setProducts(prev => prev.map(p => p.id === Number(productId) ? { ...p, stock: Math.max(0, p.stock + (kind === 'Incoming' ? qty : -qty)) } : p))
@@ -81,7 +74,7 @@ function App() {
         {page === 'Inventory' && <Inventory products={filteredProducts} onAdd={() => setModal('product')} onScan={() => setModal('scanner')} onEdit={p => { setScanValue(p.barcode); setModal('movement') }}/>}
         {page === 'Orders' && <Orders orders={filteredOrders} onAdd={() => setModal('order')}/>}
         {page === 'Incoming' && <Movement products={products} kind="Incoming" onAdd={() => setModal('movement-in')} />}
-        {page === 'Outgoing' && <ParcelOperations onScan={mode => { setParcelMode(mode); setScanValue(''); setModal('parcel-scanner') }} orders={orders} />}
+        {page === 'Outgoing' && <ParcelOperations onScan={mode => { setParcelMode(mode); setScanValue(''); setModal('parcel-scanner') }} parcelLogs={parcelLogs} />}
         {page === 'Expenses' && <Expenses expenses={expenses} onAdd={() => setModal('expense')}/>}
         {page === 'Reports' && <Reports products={products} orders={orders} expenses={expenses}/>}
       </div>
@@ -121,7 +114,19 @@ function Inventory({ products, onAdd, onScan, onEdit }) { return <>
   <div className="stats-grid compact-stats"><Stat label="Total products" value={products.length} change="Across categories" trend="neutral" icon={Package} tone="blue" note="active SKUs"/><Stat label="Units in stock" value={products.reduce((s,p)=>s+p.stock,0)} change="Available" trend="up" icon={Boxes} tone="violet" note="total quantity"/><Stat label="Low stock items" value={products.filter(p=>p.stock>0&&p.stock<=8).length} change="Needs attention" trend="down" icon={CircleAlert} tone="orange" note="8 units or less"/><Stat label="Out of stock" value={products.filter(p=>p.stock===0).length} change="Restock needed" trend="down" icon={Package} tone="green" note="unavailable items"/></div>
   <section className="panel table-panel"><div className="table-toolbar"><div><h3>All products <span className="count-pill">{products.length}</span></h3><p>Your product catalogue and stock status</p></div><div className="toolbar-actions"><button className="select-chip"><Filter size={14}/> Filter <ChevronDown size={14}/></button><button className="select-chip"><Download size={14}/> Export</button></div></div><ProductTable products={products} onEdit={onEdit}/></section>
 </> }
-function ParcelOperations({ onScan, orders }) { const modes=[{id:'dispatch',title:'Dispatch outgoing parcel',desc:'Scan shipping label when handing parcel to courier.',icon:ArrowUpFromLine},{id:'rto',title:'Receive RTO parcel',desc:'Scan returned-to-origin parcel and add units back to stock.',icon:ArrowDownToLine},{id:'return',title:'Receive customer return',desc:'Scan customer-return parcel and update inventory.',icon:Package}]; return <><PageHeading eyebrow="PARCEL OPERATIONS" title="Dispatch & returns" desc="Scan the parcel AWB / shipping label to update order status and stock."/><div className="parcel-mode-grid">{modes.map(m=><section className="panel parcel-mode-card" key={m.id}><div className="movement-icon"><m.icon size={21}/></div><h3>{m.title}</h3><p>{m.desc}</p><Button icon={ScanLine} onClick={()=>onScan(m.id)}>Open scanner</Button></section>)}</div><section className="panel table-panel"><div className="table-toolbar"><div><h3>Recent parcel orders</h3><p>Orders available for dispatch and return scanning</p></div></div><OrderTable orders={orders}/></section></> }
+function ParcelOperations({ onScan, parcelLogs }) {
+  const today = new Date().toDateString()
+  const todayLogs = parcelLogs.filter(x => new Date(x.createdAt).toDateString() === today)
+  const outgoing = todayLogs.filter(x => x.mode === 'dispatch')
+  const rto = todayLogs.filter(x => x.mode === 'rto')
+  const customerReturns = todayLogs.filter(x => x.mode === 'return')
+  const modes = [
+    { id: 'dispatch', title: 'Outgoing parcels', desc: 'Scan each shipping label when handing parcels to the courier.', icon: ArrowUpFromLine, count: outgoing.length },
+    { id: 'rto', title: 'RTO received', desc: 'Scan each parcel that has returned to origin.', icon: ArrowDownToLine, count: rto.length },
+    { id: 'return', title: 'Customer returns', desc: 'Scan each parcel returned by a customer.', icon: Package, count: customerReturns.length }
+  ]
+  return <><PageHeading eyebrow="PARCEL OPERATIONS" title="Dispatch & returns" desc="Two workflows: parcels sent out and parcels received back."/><div className="parcel-mode-grid">{modes.map(m=><section className="panel parcel-mode-card" key={m.id}><div className="movement-icon"><m.icon size={21}/></div><h3>{m.title}</h3><p>{m.desc}</p><strong className="parcel-count">{m.count} <small>today</small></strong><Button icon={ScanLine} onClick={()=>onScan(m.id)}>Scan parcel</Button></section>)}</div><section className="panel table-panel"><div className="table-toolbar"><div><h3>Today's parcel activity</h3><p>{todayLogs.length} parcels recorded today</p></div></div><div className="table-scroll"><table><thead><tr><th>TIME</th><th>TYPE</th><th>BARCODE / AWB</th><th>CUSTOMER NAME</th></tr></thead><tbody>{todayLogs.map(x=><tr key={x.id}><td>{new Date(x.createdAt).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</td><td><span className="channel-tag">{x.mode==='dispatch'?'Outgoing':x.mode==='rto'?'RTO':'Customer Return'}</span></td><td className="id-cell">{x.code}</td><td className="customer-cell">{x.customerName}</td></tr>)}</tbody></table>{!todayLogs.length&&<Empty text="No parcels scanned today yet."/ >}</div></section></>
+}
 function Orders({ orders, onAdd }) { return <><PageHeading eyebrow="SALES MANAGEMENT" title="Orders" desc="Track orders from every selling channel." action={<Button icon={Plus} onClick={onAdd}>Create order</Button>}/><div className="stats-grid compact-stats"><Stat label="All orders" value={orders.length} change="All channels" trend="neutral" icon={ShoppingBag} tone="blue" note="in this workspace"/><Stat label="Processing" value={orders.filter(o=>o.status==='Processing').length} change="Action needed" trend="neutral" icon={Clock3} tone="orange" note="to be packed"/><Stat label="Shipped" value={orders.filter(o=>o.status==='Shipped').length} change="In transit" trend="neutral" icon={Truck} tone="violet" note="on the way"/><Stat label="Delivered" value={orders.filter(o=>o.status==='Delivered').length} change="Completed" trend="up" icon={Check} tone="green" note="successfully delivered"/></div><section className="panel table-panel"><div className="table-toolbar"><div><h3>All orders <span className="count-pill">{orders.length}</span></h3><p>Review and manage your recent orders</p></div><button className="select-chip"><Filter size={14}/> Filter</button></div><OrderTable orders={orders}/></section></> }
 function OrderTable({ orders }) { return <div className="table-scroll"><table><thead><tr><th>ORDER ID</th><th>CUSTOMER</th><th>DATE</th><th>CHANNEL</th><th>AMOUNT</th><th>STATUS</th></tr></thead><tbody>{orders.map(o=><tr key={o.id}><td className="id-cell">{o.id}</td><td><b className="customer-cell">{o.customer}</b></td><td>{o.date}</td><td><span className="channel-tag">{o.channel}</span></td><td className="amount-cell">{money(o.amount)}</td><td><Status status={o.status}/></td></tr>)}</tbody></table>{!orders.length&&<Empty text="No orders match your search."/>}</div> }
 function ProductTable({ products, onEdit }) { return <div className="table-scroll"><table><thead><tr><th>PRODUCT</th><th>SKU</th><th>CATEGORY</th><th>PRICE</th><th>STOCK</th><th>STOCK STATUS</th><th/></tr></thead><tbody>{products.map(p=><tr key={p.id}><td><div className="product-cell"><div className="product-thumb"><Package size={17}/></div><b>{p.name}</b></div></td><td className="id-cell">{p.sku}</td><td>{p.category}</td><td className="amount-cell">{money(p.price)}</td><td><b>{p.stock}</b></td><td><StockStatus stock={p.stock}/></td><td><button className="row-action" onClick={()=>onEdit(p)} title="Adjust stock"><MoreHorizontal size={18}/></button></td></tr>)}</tbody></table>{!products.length&&<Empty text="No products found. Try another search."/>}</div> }
@@ -134,8 +139,8 @@ function Expenses({ expenses, onAdd }) { return <><PageHeading eyebrow="COST MAN
 function Reports({ products, orders, expenses }) { const sales=orders.reduce((s,o)=>s+o.amount,0), costs=expenses.reduce((s,e)=>s+e.amount,0); return <><PageHeading eyebrow="BUSINESS INSIGHTS" title="Reports" desc="A simple summary of sales, stock and operating costs." action={<Button variant="outline" icon={Download} onClick={()=>window.print()}>Print report</Button>}/><div className="stats-grid compact-stats"><Stat label="Order value" value={money(sales)} change="All orders" trend="up" icon={IndianRupee} tone="blue" note="gross order value"/><Stat label="Expenses" value={money(costs)} change="Recorded" trend="neutral" icon={ReceiptText} tone="orange" note="business costs"/><Stat label="Net order value*" value={money(sales-costs)} change="Estimate" trend={sales>=costs?'up':'down'} icon={TrendingUp} tone="green" note="sales less expenses"/><Stat label="Stock at cost" value={money(products.reduce((s,p)=>s+p.stock*p.cost,0))} change="Current" trend="neutral" icon={Boxes} tone="violet" note="inventory valuation"/></div><div className="report-note">*Indicative demo calculation. This is not accounting profit; taxes, marketplace fees, refunds and cost of goods sold are not yet included.</div><section className="panel report-panel"><h3>Inventory health</h3><p>Current product availability</p>{[['Healthy stock',products.filter(p=>p.stock>8).length,'#2caa78'],['Low stock',products.filter(p=>p.stock>0&&p.stock<=8).length,'#e5a13b'],['Out of stock',products.filter(p=>p.stock===0).length,'#e16b6b']].map(([label,n,color])=><div className="report-row" key={label}><span>{label}</span><div className="report-track"><i style={{width:(products.length?n/products.length*100:0)+'%',background:color}}/></div><b>{n}</b></div>)}</section></> }
 function Modal({ type, products, scanValue, setScanValue, onClose, onProduct, onExpense, onOrder, onMovement, onParcelScan, parcelMode, notify }) {
   const [form,setForm]=useState({name:'',sku:'',category:'General',stock:'10',price:'199',cost:'50',barcode:scanValue,customer:'',amount:'',channel:'Direct',title:'',expenseCategory:'Packaging',productId:products[0]?.id||'',qty:'1',awb:''})
-  const [scanning,setScanning]=useState(false), videoRef=useRef(null), controlsRef=useRef(null)
-  useEffect(()=>{ if(type!=='scanner' && type!=='parcel-scanner') return; let active=true; const start=async()=>{try{const reader=new BrowserMultiFormatReader();const controls=await reader.decodeFromVideoDevice(undefined,videoRef.current,(result)=>{if(result&&active){const code=result.getText();setScanValue(code);setForm(f=>({...f,barcode:code}));setScanning(false);controlsRef.current?.stop();if(type==='parcel-scanner'){onParcelScan(code,parcelMode);onClose()}else{notify('Barcode detected: '+code)}}});controlsRef.current=controls;setScanning(true)}catch(e){notify('Camera unavailable. Enter barcode manually.')}}; start(); return()=>{active=false;controlsRef.current?.stop() }},[type])
+  const [scanning,setScanning]=useState(false), [ocrName,setOcrName]=useState(''), [ocrBusy,setOcrBusy]=useState(false), videoRef=useRef(null), controlsRef=useRef(null)
+  useEffect(()=>{ if(type!=='scanner' && type!=='parcel-scanner') return; let active=true; const start=async()=>{try{const reader=new BrowserMultiFormatReader();const controls=await reader.decodeFromVideoDevice(undefined,videoRef.current,(result)=>{if(result&&active){const code=result.getText();setScanValue(code);setForm(f=>({...f,barcode:code}));setScanning(false);controlsRef.current?.stop();if(type==='parcel-scanner'){const video=videoRef.current;const canvas=document.createElement('canvas');canvas.width=video?.videoWidth||640;canvas.height=video?.videoHeight||480;canvas.getContext('2d')?.drawImage(video,0,0,canvas.width,canvas.height);setOcrBusy(true);Tesseract.recognize(canvas.toDataURL('image/png'),'eng').then(({data})=>{const lines=(data.text||'').split('\\n').map(x=>x.trim()).filter(Boolean);const candidate=lines.find(x=>/^[A-Z][A-Z .'-]{4,}$/.test(x)&&!/(SHIP|DELIVER|RETURN|ADDRESS|MOBILE|PHONE|PINCODE|AWB|ORDER)/i.test(x));setOcrName(candidate||'')}).catch(()=>notify('Name could not be read. Enter it manually.')).finally(()=>setOcrBusy(false))}else{notify('Barcode detected: '+code)}}});controlsRef.current=controls;setScanning(true)}catch(e){notify('Camera unavailable. Enter barcode manually.')}}; start(); return()=>{active=false;controlsRef.current?.stop() }},[type])
   const update=(k,v)=>setForm(f=>({...f,[k]:v}))
   const title=type==='parcel-scanner'?(parcelMode==='dispatch'?'Scan outgoing parcel':parcelMode==='rto'?'Scan RTO parcel':'Scan customer return'):type==='product'?'Add new product':type==='expense'?'Add business expense':type==='order'?'Create new order':type==='scanner'?'Scan product barcode':type==='movement-in'?'Record incoming stock':type==='movement-out'?'Record outgoing stock':'Adjust stock'
   const submit=e=>{e.preventDefault(); if(type==='product')onProduct(form); if(type==='expense')onExpense({title:form.title,category:form.expenseCategory,amount:form.amount}); if(type==='order')onOrder({customer:form.customer,amount:Number(form.amount),channel:form.channel,awb:form.awb,productId:form.productId,qty:form.qty}); if(type.startsWith('movement'))onMovement(type==='movement-out'?'Outgoing':'Incoming',form.productId,Number(form.qty))}
