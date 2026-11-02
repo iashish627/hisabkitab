@@ -76,7 +76,7 @@ function App() {
         {page === 'Incoming' && <ParcelOperations page={page} onScan={mode => { setParcelMode(mode); setScanValue(''); setModal('parcel-scanner') }} parcelLogs={parcelLogs} page={page} />}
         {page === 'Outgoing' && <ParcelOperations page={page} onScan={mode => { setParcelMode(mode); setScanValue(''); setModal('parcel-scanner') }} parcelLogs={parcelLogs} />}
         {page === 'Expenses' && <Expenses expenses={expenses} onAdd={() => setModal('expense')}/>}
-        {page === 'Reports' && <Reports products={products} orders={orders} expenses={expenses}/>}
+        {page === 'Reports' && <Reports products={products} orders={orders} expenses={expenses} parcelLogs={parcelLogs}/>}
       </div>
     </main>
     {modal && <Modal type={modal} products={products} scanValue={scanValue} setScanValue={setScanValue} onClose={() => setModal('')} onProduct={addProduct} onExpense={addExpense} onOrder={addOrder} onMovement={recordMovement} onParcelScan={processParcelScan} parcelMode={parcelMode} notify={notify}/>}
@@ -150,7 +150,50 @@ function Empty({ text }) { return <div className="empty-state"><Package size={24
 function Movement({ products, kind, onAdd }) { return <><PageHeading eyebrow="STOCK MOVEMENT" title={kind+' stock'} desc={kind==='Incoming'?'Record purchases, returns and restocked products.':'Record sales, damaged items and stock dispatched.'} action={<Button icon={Plus} onClick={onAdd}>Record {kind.toLowerCase()}</Button>}/><div className="movement-banner"><div className="movement-icon"><KindIcon kind={kind}/></div><div><b>{kind==='Incoming'?'Stock coming into your business':'Stock leaving your business'}</b><span>{kind==='Incoming'?'Keep purchase and restock quantities up to date.':'Keep sales, dispatches and damaged stock accounted for.'}</span></div></div><section className="panel table-panel"><div className="table-toolbar"><div><h3>Current stock</h3><p>Select a product to review its available quantity</p></div></div><ProductTable products={products} onEdit={p=>onAdd(p)}/></section></> }
 function KindIcon({kind}) { return kind==='Incoming'?<ArrowDownToLine size={20}/>:<ArrowUpFromLine size={20}/> }
 function Expenses({ expenses, onAdd }) { return <><PageHeading eyebrow="COST MANAGEMENT" title="Expenses" desc="Record business spending and keep costs under control." action={<Button icon={Plus} onClick={onAdd}>Add expense</Button>}/><div className="stats-grid compact-stats"><Stat label="Total expenses" value={money(expenses.reduce((s,e)=>s+e.amount,0))} change="Recorded" trend="neutral" icon={IndianRupee} tone="blue" note="all recorded expenses"/><Stat label="Transactions" value={expenses.length} change="Entries" trend="neutral" icon={ReceiptText} tone="violet" note="expense records"/><Stat label="Largest expense" value={money(Math.max(0,...expenses.map(e=>e.amount)))} change="Single entry" trend="neutral" icon={Wallet} tone="orange" note="highest amount"/><Stat label="Categories" value={new Set(expenses.map(e=>e.category)).size} change="Expense types" trend="neutral" icon={Tag} tone="green" note="being tracked"/></div><section className="panel table-panel"><div className="table-toolbar"><div><h3>Expense history</h3><p>All recorded business expenses</p></div><button className="select-chip"><Download size={14}/> Export</button></div><div className="table-scroll"><table><thead><tr><th>DESCRIPTION</th><th>CATEGORY</th><th>DATE</th><th>AMOUNT</th></tr></thead><tbody>{expenses.map(e=><tr key={e.id}><td><b className="customer-cell">{e.title}</b></td><td><span className="channel-tag">{e.category}</span></td><td>{e.date}</td><td className="amount-cell">{money(e.amount)}</td></tr>)}</tbody></table></div></section></> }
-function Reports({ products, orders, expenses }) { const sales=orders.reduce((s,o)=>s+o.amount,0), costs=expenses.reduce((s,e)=>s+e.amount,0); return <><PageHeading eyebrow="BUSINESS INSIGHTS" title="Reports" desc="A simple summary of sales, stock and operating costs." action={<Button variant="outline" icon={Download} onClick={()=>window.print()}>Print report</Button>}/><div className="stats-grid compact-stats"><Stat label="Order value" value={money(sales)} change="All orders" trend="up" icon={IndianRupee} tone="blue" note="gross order value"/><Stat label="Expenses" value={money(costs)} change="Recorded" trend="neutral" icon={ReceiptText} tone="orange" note="business costs"/><Stat label="Net order value*" value={money(sales-costs)} change="Estimate" trend={sales>=costs?'up':'down'} icon={TrendingUp} tone="green" note="sales less expenses"/><Stat label="Stock at cost" value={money(products.reduce((s,p)=>s+p.stock*p.cost,0))} change="Current" trend="neutral" icon={Boxes} tone="violet" note="inventory valuation"/></div><div className="report-note">*Indicative demo calculation. This is not accounting profit; taxes, marketplace fees, refunds and cost of goods sold are not yet included.</div><section className="panel report-panel"><h3>Inventory health</h3><p>Current product availability</p>{[['Healthy stock',products.filter(p=>p.stock>8).length,'#2caa78'],['Low stock',products.filter(p=>p.stock>0&&p.stock<=8).length,'#e5a13b'],['Out of stock',products.filter(p=>p.stock===0).length,'#e16b6b']].map(([label,n,color])=><div className="report-row" key={label}><span>{label}</span><div className="report-track"><i style={{width:(products.length?n/products.length*100:0)+'%',background:color}}/></div><b>{n}</b></div>)}</section></> }
+function Reports({ products, orders, expenses, parcelLogs = [] }) {
+  const [period, setPeriod] = useState('day')
+  const now = new Date()
+  const start = new Date(now)
+  if (period === 'day') start.setHours(0,0,0,0)
+  if (period === 'week') { start.setDate(now.getDate()-6); start.setHours(0,0,0,0) }
+  if (period === 'month') { start.setDate(now.getDate()-29); start.setHours(0,0,0,0) }
+  const logs = parcelLogs.filter(x => new Date(x.createdAt) >= start && new Date(x.createdAt) <= now)
+  const outgoing = logs.filter(x => x.mode === 'dispatch').length
+  const rto = logs.filter(x => x.mode === 'rto').length
+  const customerReturns = logs.filter(x => x.mode === 'return').length
+  const returns = rto + customerReturns
+  const returnRate = outgoing ? Math.round(returns / outgoing * 100) : 0
+  const days = period === 'day' ? 1 : period === 'week' ? 7 : 30
+  const buckets = Array.from({length:days},(_,idx) => {
+    const d = new Date(start); d.setDate(start.getDate()+idx)
+    const key = d.toDateString()
+    return { label: period === 'day' ? 'Today' : d.toLocaleDateString('en-IN',{day:'numeric',month:period==='month'?'short':undefined,weekday:period==='week'?'short':undefined}), count: logs.filter(x=>new Date(x.createdAt).toDateString()===key).length }
+  })
+  const maxBucket = Math.max(1,...buckets.map(x=>x.count))
+  const sales=orders.reduce((sum,o)=>sum+o.amount,0), costs=expenses.reduce((sum,e)=>sum+e.amount,0)
+  return <>
+    <PageHeading eyebrow="BUSINESS INTELLIGENCE" title="Reports & analysis" desc="Daily, weekly and monthly parcel activity with business performance." action={<Button variant="outline" icon={Download} onClick={()=>window.print()}>Print report</Button>}/>
+    <section className="panel parcel-analytics">
+      <div className="analytics-heading"><div><h3>Parcel performance</h3><p>Dispatch and return activity for the selected period</p></div><div className="period-switch">{[['day','Daily'],['week','Weekly'],['month','Monthly']].map(([id,label])=><button key={id} className={period===id?'selected':''} onClick={()=>setPeriod(id)}>{label}</button>)}</div></div>
+      <div className="analytics-range">{period==='day'?'Today':period==='week'?'Last 7 days':'Last 30 days'} · {start.toLocaleDateString('en-IN')} – {now.toLocaleDateString('en-IN')}</div>
+      <div className="analytics-stats">
+        <div><span>Total parcels</span><strong>{logs.length}</strong><small>All scanned parcels</small></div>
+        <div><span>Outgoing</span><strong>{outgoing}</strong><small>Sent to customers</small></div>
+        <div><span>RTO received</span><strong>{rto}</strong><small>Returned by courier</small></div>
+        <div><span>Customer returns</span><strong>{customerReturns}</strong><small>Returned by customers</small></div>
+        <div><span>Return ratio</span><strong>{returnRate}%</strong><small>Returns ÷ outgoing</small></div>
+      </div>
+      <div className="analytics-chart-head"><div><h4>Parcel activity trend</h4><span>{period==='day'?'Scans today':period==='week'?'Daily scans · 7 days':'Daily scans · 30 days'}</span></div><b>{logs.length} scans</b></div>
+      <div className={'analytics-bars '+(period==='month'?'month-bars':'')}>{buckets.map((b,idx)=><div className="analytics-bar-col" key={idx} title={b.label+': '+b.count+' parcels'}><div className="analytics-bar-track"><i style={{height:(b.count/maxBucket*100)+'%'}}/></div><small>{period==='month'?(idx%5===0?b.label:''):b.label}</small></div>)}</div>
+      <div className="analytics-legend"><i/> Scanned parcels</div>
+      <div className="analytics-breakdown"><div><span className="break-dot outgoing-dot"/>Outgoing <b>{outgoing}</b></div><div><span className="break-dot rto-dot"/>RTO <b>{rto}</b></div><div><span className="break-dot return-dot"/>Customer returns <b>{customerReturns}</b></div></div>
+      {!logs.length&&<div className="analytics-empty">No parcel scans recorded in this period yet. Scan parcels in Outgoing or Incoming to build your reports.</div>}
+    </section>
+    <div className="stats-grid compact-stats"><Stat label="Order value" value={money(sales)} change="All orders" trend="up" icon={IndianRupee} tone="blue" note="gross order value"/><Stat label="Expenses" value={money(costs)} change="Recorded" trend="neutral" icon={ReceiptText} tone="orange" note="business costs"/><Stat label="Net order value*" value={money(sales-costs)} change="Estimate" trend={sales>=costs?'up':'down'} icon={TrendingUp} tone="green" note="sales less expenses"/><Stat label="Stock at cost" value={money(products.reduce((sum,p)=>sum+p.stock*p.cost,0))} change="Current" trend="neutral" icon={Boxes} tone="violet" note="inventory valuation"/></div>
+    <div className="report-note">*Indicative calculation only. Taxes, marketplace fees, refunds and cost of goods sold are not included. Return ratio is a simple operational indicator, not a final return rate for a matched order cohort.</div>
+    <section className="panel report-panel"><h3>Inventory health</h3><p>Current product availability</p>{[['Healthy stock',products.filter(p=>p.stock>8).length,'#2caa78'],['Low stock',products.filter(p=>p.stock>0&&p.stock<=8).length,'#e5a13b'],['Out of stock',products.filter(p=>p.stock===0).length,'#e16b6b']].map(([label,n,color])=><div className="report-row" key={label}><span>{label}</span><div className="report-track"><i style={{width:(products.length?n/products.length*100:0)+'%',background:color}}/></div><b>{n}</b></div>)}</section>
+  </>
+}
 function Modal({ type, products, scanValue, setScanValue, onClose, onProduct, onExpense, onOrder, onMovement, onParcelScan, parcelMode, notify }) {
   const [form,setForm]=useState({name:'',sku:'',category:'General',stock:'10',price:'199',cost:'50',barcode:scanValue,customer:'',amount:'',channel:'Direct',title:'',expenseCategory:'Packaging',productId:products[0]?.id||'',qty:'1',awb:''})
   const [scanning,setScanning]=useState(false), [ocrName,setOcrName]=useState(''), [ocrBusy,setOcrBusy]=useState(false), videoRef=useRef(null), controlsRef=useRef(null)
