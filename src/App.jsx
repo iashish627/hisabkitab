@@ -8,28 +8,10 @@ import {
   Clock3, Truck, Wallet, ArrowUpRight, ArrowDownRight, Sparkles, Tag
 } from 'lucide-react'
 
-const initialProducts = [
-  { id: 1, name: 'Handmade Floral Greeting Card', sku: 'CARD-001', category: 'Greeting cards', stock: 42, price: 199, cost: 55, barcode: '890100000001' },
-  { id: 2, name: 'Personalised Birthday Card', sku: 'CARD-002', category: 'Greeting cards', stock: 8, price: 249, cost: 70, barcode: '890100000002' },
-  { id: 3, name: 'Cotton Everyday Kurti', sku: 'KURT-001', category: 'Clothing', stock: 16, price: 599, cost: 310, barcode: '890100000003' },
-  { id: 4, name: 'Minimal Thank You Card', sku: 'CARD-003', category: 'Greeting cards', stock: 3, price: 149, cost: 38, barcode: '890100000004' },
-  { id: 5, name: 'Printed Cotton Dupatta', sku: 'DUP-001', category: 'Clothing', stock: 0, price: 399, cost: 190, barcode: '890100000005' }
-]
-const initialOrders = [
-  { id: 'HK-1048', customer: 'Priya Sharma', date: '02 Nov 2026', items: 2, amount: 448, status: 'Delivered', channel: 'Meesho' },
-  { id: 'HK-1047', customer: 'Aarav Patel', date: '02 Nov 2026', items: 1, amount: 599, status: 'Processing', channel: 'Flipkart' },
-  { id: 'HK-1046', customer: 'Neha Verma', date: '01 Nov 2026', items: 3, amount: 697, status: 'Shipped', channel: 'Direct' },
-  { id: 'HK-1045', customer: 'Rohan Shah', date: '01 Nov 2026', items: 1, amount: 199, status: 'Cancelled', channel: 'Meesho' }
-]
-const initialExpenses = [
-  { id: 1, title: 'Packaging material', category: 'Packaging', date: '02 Nov 2026', amount: 850 },
-  { id: 2, title: 'Courier charges', category: 'Shipping', date: '01 Nov 2026', amount: 420 },
-  { id: 3, title: 'Card paper & printing', category: 'Raw material', date: '31 Oct 2026', amount: 1250 }
-]
 const money = n => '₹' + Number(n || 0).toLocaleString('en-IN')
 const nav = [
   { label: 'Overview', items: [{ name: 'Dashboard', icon: LayoutDashboard }] },
-  { label: 'Manage', items: [{ name: 'Orders', icon: ShoppingBag }, { name: 'Inventory', icon: Package }, { name: 'Incoming', icon: ArrowDownToLine }, { name: 'Outgoing', icon: ArrowUpFromLine }] },
+  { label: 'Manage', items: [{ name: 'Orders', icon: ShoppingBag }, { name: 'Inventory', icon: Package }, { name: 'Incoming', icon: ArrowDownToLine }, { name: 'Outgoing', icon: ArrowUpFromLine }, { name: 'Barcode scanner', icon: ScanLine }] },
   { label: 'Business', items: [{ name: 'Expenses', icon: ReceiptText }, { name: 'Reports', icon: ChartNoAxesCombined }] }
 ]
 
@@ -37,9 +19,9 @@ function App() {
   const [page, setPage] = useState('Dashboard')
   const [mobileOpen, setMobileOpen] = useState(false)
   const [query, setQuery] = useState('')
-  const [products, setProducts] = useState(() => JSON.parse(localStorage.getItem('hk-products') || 'null') || initialProducts)
-  const [orders, setOrders] = useState(() => JSON.parse(localStorage.getItem('hk-orders') || 'null') || initialOrders)
-  const [expenses, setExpenses] = useState(() => JSON.parse(localStorage.getItem('hk-expenses') || 'null') || initialExpenses)
+  const [products, setProducts] = useState(() => JSON.parse(localStorage.getItem('hk-products') || '[]'))
+  const [orders, setOrders] = useState(() => JSON.parse(localStorage.getItem('hk-orders') || '[]'))
+  const [expenses, setExpenses] = useState(() => JSON.parse(localStorage.getItem('hk-expenses') || '[]'))
   const [modal, setModal] = useState('')
   const [toast, setToast] = useState('')
   const [scanValue, setScanValue] = useState('')
@@ -56,11 +38,11 @@ function App() {
     setModal(''); notify('Product added to inventory')
   }
   const addExpense = data => {
-    setExpenses(prev => [{ ...data, id: Date.now(), amount: Number(data.amount), date: '02 Nov 2026' }, ...prev])
+    setExpenses(prev => [{ ...data, id: Date.now(), amount: Number(data.amount), date: new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) }, ...prev])
     setModal(''); notify('Expense saved')
   }
   const addOrder = data => {
-    setOrders(prev => [{ ...data, id: 'HK-' + (1050 + prev.length), date: '02 Nov 2026', items: 1, status: 'Processing' }, ...prev])
+    setOrders(prev => [{ ...data, id: 'HK-' + (1050 + prev.length), date: new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }), items: 1, status: 'Processing' }, ...prev])
     setModal(''); notify('Order created')
   }
   const recordMovement = (kind, productId, qty) => {
@@ -71,7 +53,7 @@ function App() {
     <aside className={'sidebar ' + (mobileOpen ? 'sidebar-open' : '')}>
       <div className="brand"><div className="brand-mark"><Boxes size={21}/></div><div><strong>HisabKitab</strong><span>SELLER WORKSPACE</span></div><button className="icon-btn mobile-close" onClick={() => setMobileOpen(false)}><X size={18}/></button></div>
       <div className="store-switch"><div className="store-avatar">A</div><div><b>My Business</b><small>Seller account</small></div><ChevronDown size={15}/></div>
-      <nav>{nav.map(group => <div className="nav-group" key={group.label}><p>{group.label}</p>{group.items.map(item => <button key={item.name} onClick={() => changePage(item.name)} className={'nav-item ' + (page === item.name ? 'active' : '')}><item.icon size={18}/><span>{item.name}</span>{item.name === 'Orders' && <em>{orders.length}</em>}</button>)}</div>)}</nav>
+      <nav>{nav.map(group => <div className="nav-group" key={group.label}><p>{group.label}</p>{group.items.map(item => <button key={item.name} onClick={() => item.name === 'Barcode scanner' ? (setModal('scanner'), setMobileOpen(false)) : changePage(item.name)} className={'nav-item ' + (page === item.name ? 'active' : '')}><item.icon size={18}/><span>{item.name}</span>{item.name === 'Orders' && <em>{orders.length}</em>}</button>)}</div>)}</nav>
       <div className="sidebar-bottom"><div className="help-card"><Sparkles size={17}/><b>Keep business in control</b><span>Track stock, orders and every rupee in one place.</span></div><div className="profile"><div className="profile-avatar">AM</div><div><b>Ashish Maurya</b><small>Administrator</small></div><MoreHorizontal size={18}/></div></div>
     </aside>
     {mobileOpen && <div className="scrim" onClick={() => setMobileOpen(false)} />}
@@ -99,20 +81,20 @@ function Button({ children, variant = 'primary', onClick, icon: Icon, type = 'bu
 function Dashboard({ products, orders, expenses, onNavigate, onAdd }) {
   const stockValue = products.reduce((s,p) => s + p.stock*p.cost, 0)
   const low = products.filter(p => p.stock > 0 && p.stock <= 8).length
-  const delivered = orders.filter(o => o.status === 'Delivered').reduce((s,o) => s+o.amount,0)
+  const delivered = orders.reduce((s,o) => s+o.amount,0)
   const spent = expenses.reduce((s,e) => s+e.amount,0)
   return <>
-    <PageHeading eyebrow="MONDAY, 02 NOVEMBER 2026" title="Good evening, Ashish" desc="Here's what's happening with your business today." action={<Button icon={Plus} onClick={onAdd}>Create order</Button>}/>
-    <div className="welcome-strip"><div className="welcome-icon"><Sparkles size={19}/></div><div><b>Your business, at a glance.</b><span>Keep orders moving and stock levels healthy. Your demo workspace is ready.</span></div><button onClick={() => onNavigate('Reports')}>View business report <ArrowUpRight size={15}/></button></div>
+    <PageHeading eyebrow="MONDAY, 02 NOVEMBER 2026" title="Your business overview" desc="Here's what's happening with your business today." action={<Button icon={Plus} onClick={onAdd}>Create order</Button>}/>
+    <div className="welcome-strip"><div className="welcome-icon"><Sparkles size={19}/></div><div><b>Your business, at a glance.</b><span>Keep orders moving and stock levels healthy. Add your products, orders and expenses to start tracking your business.</span></div><button onClick={() => onNavigate('Reports')}>View business report <ArrowUpRight size={15}/></button></div>
     <div className="section-head"><div><h2>Business overview</h2><span>Performance snapshot</span></div><button className="date-chip"><CalendarDays size={15}/> This month <ChevronDown size={14}/></button></div>
     <div className="stats-grid">
-      <Stat label="Total sales" value={money(delivered + 12450)} change="+12.8%" trend="up" icon={IndianRupee} tone="blue" note="vs. last month"/>
-      <Stat label="Orders received" value={orders.length + 126} change="+8.2%" trend="up" icon={ShoppingBag} tone="violet" note="vs. last month"/>
+      <Stat label="Total sales" value={money(delivered)} change="Recorded order value" trend="up" icon={IndianRupee} tone="blue" note="vs. last month"/>
+      <Stat label="Orders received" value={orders.length} change="Recorded orders" trend="up" icon={ShoppingBag} tone="violet" note="vs. last month"/>
       <Stat label="Inventory value" value={money(stockValue)} change={low + ' low stock'} trend="down" icon={Boxes} tone="orange" note="at cost price"/>
-      <Stat label="Total expenses" value={money(spent + 6840)} change="This month" trend="neutral" icon={ReceiptText} tone="green" note="recorded expenses"/>
+      <Stat label="Total expenses" value={money(spent)} change="This month" trend="neutral" icon={ReceiptText} tone="green" note="recorded expenses"/>
     </div>
-    <div className="dashboard-grid"><section className="panel sales-panel"><div className="panel-head"><div><h3>Sales overview</h3><p>Revenue performance over time</p></div><button className="select-chip">Last 7 days <ChevronDown size={14}/></button></div><div className="chart-legend"><span><i className="legend-blue"/>Sales</span><span><i className="legend-gray"/>Orders</span></div><div className="chart"><div className="y-labels"><span>₹8k</span><span>₹6k</span><span>₹4k</span><span>₹2k</span><span>₹0</span></div><div className="chart-content"><div className="grid-lines"><i/><i/><i/><i/><i/></div><svg viewBox="0 0 650 190" preserveAspectRatio="none" role="img" aria-label="Sales trend chart"><defs><linearGradient id="area" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#4979e8" stopOpacity=".20"/><stop offset="100%" stopColor="#4979e8" stopOpacity="0"/></linearGradient></defs><path d="M0 142 C38 138 45 112 92 120 S150 95 185 108 S240 70 278 88 S335 110 370 77 S425 92 463 52 S520 70 555 42 S610 50 650 18 L650 190 L0 190Z" fill="url(#area)"/><path d="M0 142 C38 138 45 112 92 120 S150 95 185 108 S240 70 278 88 S335 110 370 77 S425 92 463 52 S520 70 555 42 S610 50 650 18" fill="none" stroke="#4979e8" strokeWidth="3" strokeLinecap="round"/></svg><div className="x-labels"><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span></div></div></div></section>
-      <section className="panel channel-panel"><div className="panel-head"><div><h3>Order channels</h3><p>Where orders come from</p></div><MoreHorizontal size={19}/></div><div className="donut-wrap"><div className="donut"><div><b>128</b><span>Total orders</span></div></div></div><div className="channel-list"><div><i className="dot dot-blue"/><span>Meesho</span><b>54%</b></div><div><i className="dot dot-purple"/><span>Flipkart</span><b>28%</b></div><div><i className="dot dot-orange"/><span>Direct</span><b>18%</b></div></div></section></div>
+    <div className="dashboard-grid"><section className="panel sales-panel"><div className="panel-head"><div><h3>Sales overview</h3><p>Revenue performance over time</p></div><button className="select-chip">Last 7 days <ChevronDown size={14}/></button></div><div className="empty-state">Sales trend will appear here after you record orders.</div></section>
+      <section className="panel channel-panel"><div className="panel-head"><div><h3>Order channels</h3><p>Where orders come from</p></div><MoreHorizontal size={19}/></div><div className="empty-state">Channel breakdown will appear after you record orders.</div></section></div>
     <div className="bottom-grid"><section className="panel"><div className="panel-head"><div><h3>Recent orders</h3><p>Latest activity from your store</p></div><button className="text-link" onClick={() => onNavigate('Orders')}>View all <ArrowUpRight size={14}/></button></div><OrderTable orders={orders.slice(0,4)}/></section><section className="panel stock-panel"><div className="panel-head"><div><h3>Stock alerts</h3><p>Products that need attention</p></div><button className="text-link" onClick={() => onNavigate('Inventory')}>Inventory <ArrowUpRight size={14}/></button></div>{products.filter(p=>p.stock<=8).slice(0,4).map(p=><div className="stock-alert" key={p.id}><div className="product-thumb"><Package size={17}/></div><div className="stock-name"><b>{p.name}</b><span>{p.sku}</span></div><span className={'stock-count ' + (p.stock===0?'zero':'')}>{p.stock===0?'Out of stock':p.stock+' left'}</span></div>)}</section></div>
   </>
 }
@@ -130,7 +112,7 @@ function StockStatus({ stock }) { return <span className={'status '+(stock===0?'
 function Empty({ text }) { return <div className="empty-state"><Package size={24}/>{text}</div> }
 function Movement({ products, kind, onAdd }) { return <><PageHeading eyebrow="STOCK MOVEMENT" title={kind+' stock'} desc={kind==='Incoming'?'Record purchases, returns and restocked products.':'Record sales, damaged items and stock dispatched.'} action={<Button icon={Plus} onClick={onAdd}>Record {kind.toLowerCase()}</Button>}/><div className="movement-banner"><div className="movement-icon"><KindIcon kind={kind}/></div><div><b>{kind==='Incoming'?'Stock coming into your business':'Stock leaving your business'}</b><span>{kind==='Incoming'?'Keep purchase and restock quantities up to date.':'Keep sales, dispatches and damaged stock accounted for.'}</span></div></div><section className="panel table-panel"><div className="table-toolbar"><div><h3>Current stock</h3><p>Select a product to review its available quantity</p></div></div><ProductTable products={products} onEdit={p=>onAdd(p)}/></section></> }
 function KindIcon({kind}) { return kind==='Incoming'?<ArrowDownToLine size={20}/>:<ArrowUpFromLine size={20}/> }
-function Expenses({ expenses, onAdd }) { return <><PageHeading eyebrow="COST MANAGEMENT" title="Expenses" desc="Record business spending and keep costs under control." action={<Button icon={Plus} onClick={onAdd}>Add expense</Button>}/><div className="stats-grid compact-stats"><Stat label="Total expenses" value={money(expenses.reduce((s,e)=>s+e.amount,0))} change="Recorded" trend="neutral" icon={IndianRupee} tone="blue" note="all time in this demo"/><Stat label="Transactions" value={expenses.length} change="Entries" trend="neutral" icon={ReceiptText} tone="violet" note="expense records"/><Stat label="Largest expense" value={money(Math.max(0,...expenses.map(e=>e.amount)))} change="Single entry" trend="neutral" icon={Wallet} tone="orange" note="highest amount"/><Stat label="Categories" value={new Set(expenses.map(e=>e.category)).size} change="Expense types" trend="neutral" icon={Tag} tone="green" note="being tracked"/></div><section className="panel table-panel"><div className="table-toolbar"><div><h3>Expense history</h3><p>All recorded business expenses</p></div><button className="select-chip"><Download size={14}/> Export</button></div><div className="table-scroll"><table><thead><tr><th>DESCRIPTION</th><th>CATEGORY</th><th>DATE</th><th>AMOUNT</th></tr></thead><tbody>{expenses.map(e=><tr key={e.id}><td><b className="customer-cell">{e.title}</b></td><td><span className="channel-tag">{e.category}</span></td><td>{e.date}</td><td className="amount-cell">{money(e.amount)}</td></tr>)}</tbody></table></div></section></> }
+function Expenses({ expenses, onAdd }) { return <><PageHeading eyebrow="COST MANAGEMENT" title="Expenses" desc="Record business spending and keep costs under control." action={<Button icon={Plus} onClick={onAdd}>Add expense</Button>}/><div className="stats-grid compact-stats"><Stat label="Total expenses" value={money(expenses.reduce((s,e)=>s+e.amount,0))} change="Recorded" trend="neutral" icon={IndianRupee} tone="blue" note="all recorded expenses"/><Stat label="Transactions" value={expenses.length} change="Entries" trend="neutral" icon={ReceiptText} tone="violet" note="expense records"/><Stat label="Largest expense" value={money(Math.max(0,...expenses.map(e=>e.amount)))} change="Single entry" trend="neutral" icon={Wallet} tone="orange" note="highest amount"/><Stat label="Categories" value={new Set(expenses.map(e=>e.category)).size} change="Expense types" trend="neutral" icon={Tag} tone="green" note="being tracked"/></div><section className="panel table-panel"><div className="table-toolbar"><div><h3>Expense history</h3><p>All recorded business expenses</p></div><button className="select-chip"><Download size={14}/> Export</button></div><div className="table-scroll"><table><thead><tr><th>DESCRIPTION</th><th>CATEGORY</th><th>DATE</th><th>AMOUNT</th></tr></thead><tbody>{expenses.map(e=><tr key={e.id}><td><b className="customer-cell">{e.title}</b></td><td><span className="channel-tag">{e.category}</span></td><td>{e.date}</td><td className="amount-cell">{money(e.amount)}</td></tr>)}</tbody></table></div></section></> }
 function Reports({ products, orders, expenses }) { const sales=orders.reduce((s,o)=>s+o.amount,0), costs=expenses.reduce((s,e)=>s+e.amount,0); return <><PageHeading eyebrow="BUSINESS INSIGHTS" title="Reports" desc="A simple summary of sales, stock and operating costs." action={<Button variant="outline" icon={Download} onClick={()=>window.print()}>Print report</Button>}/><div className="stats-grid compact-stats"><Stat label="Order value" value={money(sales)} change="All orders" trend="up" icon={IndianRupee} tone="blue" note="gross order value"/><Stat label="Expenses" value={money(costs)} change="Recorded" trend="neutral" icon={ReceiptText} tone="orange" note="business costs"/><Stat label="Net order value*" value={money(sales-costs)} change="Estimate" trend={sales>=costs?'up':'down'} icon={TrendingUp} tone="green" note="sales less expenses"/><Stat label="Stock at cost" value={money(products.reduce((s,p)=>s+p.stock*p.cost,0))} change="Current" trend="neutral" icon={Boxes} tone="violet" note="inventory valuation"/></div><div className="report-note">*Indicative demo calculation. This is not accounting profit; taxes, marketplace fees, refunds and cost of goods sold are not yet included.</div><section className="panel report-panel"><h3>Inventory health</h3><p>Current product availability</p>{[['Healthy stock',products.filter(p=>p.stock>8).length,'#2caa78'],['Low stock',products.filter(p=>p.stock>0&&p.stock<=8).length,'#e5a13b'],['Out of stock',products.filter(p=>p.stock===0).length,'#e16b6b']].map(([label,n,color])=><div className="report-row" key={label}><span>{label}</span><div className="report-track"><i style={{width:(products.length?n/products.length*100:0)+'%',background:color}}/></div><b>{n}</b></div>)}</section></> }
 function Modal({ type, products, scanValue, setScanValue, onClose, onProduct, onExpense, onOrder, onMovement, notify }) {
   const [form,setForm]=useState({name:'',sku:'',category:'General',stock:'10',price:'199',cost:'50',barcode:scanValue,customer:'',amount:'',channel:'Direct',title:'',expenseCategory:'Packaging',productId:products[0]?.id||'',qty:'1'})
