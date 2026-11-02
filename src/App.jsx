@@ -73,7 +73,7 @@ function App() {
         {page === 'Dashboard' && <Dashboard products={products} orders={orders} expenses={expenses} onNavigate={changePage} onAdd={() => setModal('order')}/>}
         {page === 'Inventory' && <Inventory products={filteredProducts} onAdd={() => setModal('product')} onScan={() => setModal('scanner')} onEdit={p => { setScanValue(p.barcode); setModal('movement') }}/>}
         {page === 'Orders' && <Orders orders={filteredOrders} onAdd={() => setModal('order')}/>}
-        {page === 'Incoming' && <Movement products={products} kind="Incoming" onAdd={() => setModal('movement-in')} />}
+        {page === 'Incoming' && <ParcelOperations page={page} onScan={mode => { setParcelMode(mode); setScanValue(''); setModal('parcel-scanner') }} parcelLogs={parcelLogs} page={page} />}
         {page === 'Outgoing' && <ParcelOperations onScan={mode => { setParcelMode(mode); setScanValue(''); setModal('parcel-scanner') }} parcelLogs={parcelLogs} />}
         {page === 'Expenses' && <Expenses expenses={expenses} onAdd={() => setModal('expense')}/>}
         {page === 'Reports' && <Reports products={products} orders={orders} expenses={expenses}/>}
@@ -114,18 +114,32 @@ function Inventory({ products, onAdd, onScan, onEdit }) { return <>
   <div className="stats-grid compact-stats"><Stat label="Total products" value={products.length} change="Across categories" trend="neutral" icon={Package} tone="blue" note="active SKUs"/><Stat label="Units in stock" value={products.reduce((s,p)=>s+p.stock,0)} change="Available" trend="up" icon={Boxes} tone="violet" note="total quantity"/><Stat label="Low stock items" value={products.filter(p=>p.stock>0&&p.stock<=8).length} change="Needs attention" trend="down" icon={CircleAlert} tone="orange" note="8 units or less"/><Stat label="Out of stock" value={products.filter(p=>p.stock===0).length} change="Restock needed" trend="down" icon={Package} tone="green" note="unavailable items"/></div>
   <section className="panel table-panel"><div className="table-toolbar"><div><h3>All products <span className="count-pill">{products.length}</span></h3><p>Your product catalogue and stock status</p></div><div className="toolbar-actions"><button className="select-chip"><Filter size={14}/> Filter <ChevronDown size={14}/></button><button className="select-chip"><Download size={14}/> Export</button></div></div><ProductTable products={products} onEdit={onEdit}/></section>
 </> }
-function ParcelOperations({ onScan, parcelLogs }) {
+function ParcelOperations({ onScan, parcelLogs, page }) {
+  const isOutgoing = page === 'Outgoing'
+  const modes = isOutgoing
+    ? [{ id: 'dispatch', title: 'Outgoing parcels', desc: 'Scan each parcel label when handing shipments to the courier.', icon: ArrowUpFromLine }]
+    : [{ id: 'rto', title: 'RTO received', desc: 'Scan parcels returned by the courier as Return to Origin.', icon: ArrowDownToLine }, { id: 'return', title: 'Customer returns', desc: 'Scan parcels sent back by customers.', icon: Package }]
   const today = new Date().toDateString()
-  const todayLogs = parcelLogs.filter(x => new Date(x.createdAt).toDateString() === today)
-  const outgoing = todayLogs.filter(x => x.mode === 'dispatch')
-  const rto = todayLogs.filter(x => x.mode === 'rto')
-  const customerReturns = todayLogs.filter(x => x.mode === 'return')
-  const modes = [
-    { id: 'dispatch', title: 'Outgoing parcels', desc: 'Scan each shipping label when handing parcels to the courier.', icon: ArrowUpFromLine, count: outgoing.length },
-    { id: 'rto', title: 'RTO received', desc: 'Scan each parcel that has returned to origin.', icon: ArrowDownToLine, count: rto.length },
-    { id: 'return', title: 'Customer returns', desc: 'Scan each parcel returned by a customer.', icon: Package, count: customerReturns.length }
-  ]
-  return <><PageHeading eyebrow="PARCEL OPERATIONS" title="Dispatch & returns" desc="Two workflows: parcels sent out and parcels received back."/><div className="parcel-mode-grid">{modes.map(m=><section className="panel parcel-mode-card" key={m.id}><div className="movement-icon"><m.icon size={21}/></div><h3>{m.title}</h3><p>{m.desc}</p><strong className="parcel-count">{m.count} <small>today</small></strong><Button icon={ScanLine} onClick={()=>onScan(m.id)}>Scan parcel</Button></section>)}</div><section className="panel table-panel"><div className="table-toolbar"><div><h3>Today's parcel activity</h3><p>{todayLogs.length} parcels recorded today</p></div></div><div className="table-scroll"><table><thead><tr><th>TIME</th><th>TYPE</th><th>BARCODE / AWB</th><th>CUSTOMER NAME</th></tr></thead><tbody>{todayLogs.map(x=><tr key={x.id}><td>{new Date(x.createdAt).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</td><td><span className="channel-tag">{x.mode==='dispatch'?'Outgoing':x.mode==='rto'?'RTO':'Customer Return'}</span></td><td className="id-cell">{x.code}</td><td className="customer-cell">{x.customerName}</td></tr>)}</tbody></table>{!todayLogs.length&&<Empty text="No parcels scanned today yet."/ >}</div></section></>
+  const todayLogs = parcelLogs.filter(x => new Date(x.createdAt).toDateString() === today && modes.some(m => m.id === x.mode))
+  return <>
+    <PageHeading eyebrow={isOutgoing ? 'PARCEL DISPATCH' : 'PARCEL RETURNS'} title={isOutgoing ? 'Outgoing parcels' : 'Incoming returns'} desc={isOutgoing ? 'Scan parcels sent out to customers and keep a daily dispatch count.' : 'Record returned parcels separately as RTO or customer returns.'}/>
+    <div className={'parcel-mode-grid ' + (isOutgoing ? 'single-parcel-mode' : '')}>
+      {modes.map(m => {
+        const count = todayLogs.filter(x => x.mode === m.id).length
+        return <section className="panel parcel-mode-card" key={m.id}>
+          <div className="parcel-card-top"><div className="movement-icon"><m.icon size={21}/></div><span className="parcel-today">TODAY</span></div>
+          <h3>{m.title}</h3><p>{m.desc}</p>
+          <div className="parcel-card-bottom"><div className="parcel-count">{count}<small> parcels scanned today</small></div><Button icon={ScanLine} onClick={() => onScan(m.id)}>Open scanner</Button></div>
+        </section>
+      })}
+    </div>
+    <section className="panel table-panel parcel-history">
+      <div className="table-toolbar"><div><h3>Today's scan history</h3><p>{todayLogs.length} parcel{todayLogs.length===1?'':'s'} recorded today</p></div><span className="parcel-total">{todayLogs.length} TOTAL</span></div>
+      <div className="table-scroll"><table><thead><tr><th>TIME</th><th>PARCEL TYPE</th><th>BARCODE / AWB</th><th>CUSTOMER NAME</th></tr></thead><tbody>
+        {todayLogs.map(x=><tr key={x.id}><td>{new Date(x.createdAt).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</td><td><span className="channel-tag">{x.mode==='dispatch'?'Outgoing':x.mode==='rto'?'RTO':'Customer Return'}</span></td><td className="id-cell">{x.code}</td><td className="customer-cell">{x.customerName}</td></tr>)}
+      </tbody></table>{!todayLogs.length&&<Empty text="No parcels scanned today yet."/>}</div>
+    </section>
+  </>
 }
 function Orders({ orders, onAdd }) { return <><PageHeading eyebrow="SALES MANAGEMENT" title="Orders" desc="Track orders from every selling channel." action={<Button icon={Plus} onClick={onAdd}>Create order</Button>}/><div className="stats-grid compact-stats"><Stat label="All orders" value={orders.length} change="All channels" trend="neutral" icon={ShoppingBag} tone="blue" note="in this workspace"/><Stat label="Processing" value={orders.filter(o=>o.status==='Processing').length} change="Action needed" trend="neutral" icon={Clock3} tone="orange" note="to be packed"/><Stat label="Shipped" value={orders.filter(o=>o.status==='Shipped').length} change="In transit" trend="neutral" icon={Truck} tone="violet" note="on the way"/><Stat label="Delivered" value={orders.filter(o=>o.status==='Delivered').length} change="Completed" trend="up" icon={Check} tone="green" note="successfully delivered"/></div><section className="panel table-panel"><div className="table-toolbar"><div><h3>All orders <span className="count-pill">{orders.length}</span></h3><p>Review and manage your recent orders</p></div><button className="select-chip"><Filter size={14}/> Filter</button></div><OrderTable orders={orders}/></section></> }
 function OrderTable({ orders }) { return <div className="table-scroll"><table><thead><tr><th>ORDER ID</th><th>CUSTOMER</th><th>DATE</th><th>CHANNEL</th><th>AMOUNT</th><th>STATUS</th></tr></thead><tbody>{orders.map(o=><tr key={o.id}><td className="id-cell">{o.id}</td><td><b className="customer-cell">{o.customer}</b></td><td>{o.date}</td><td><span className="channel-tag">{o.channel}</span></td><td className="amount-cell">{money(o.amount)}</td><td><Status status={o.status}/></td></tr>)}</tbody></table>{!orders.length&&<Empty text="No orders match your search."/>}</div> }
