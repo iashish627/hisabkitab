@@ -51,6 +51,43 @@ function App() {
   const parcelLogsRef = useRef(parcelLogs)
   parcelLogsRef.current = parcelLogs
   const [lastBackup, setLastBackup] = useState(() => localStorage.getItem('hk-last-backup') || '')
+  const [authToken, setAuthToken] = useState(() => localStorage.getItem('hk-auth-token') || '')
+  const [loginForm, setLoginForm] = useState({ username: 'ashish', password: '' })
+  const [loginError, setLoginError] = useState('')
+  const [authLoading, setAuthLoading] = useState(false)
+  const API = 'https://hisabkitab-api.onrender.com/api'
+  const apiRequest = async (path, options = {}) => {
+    const response = await fetch(API + path, { ...options, headers: { 'Content-Type': 'application/json', ...(authToken ? { Authorization: 'Bearer ' + authToken } : {}), ...(options.headers || {}) } })
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(data.error || 'Server request failed')
+    return data
+  }
+  const signIn = async e => {
+    e.preventDefault(); setAuthLoading(true); setLoginError('')
+    try {
+      const response = await fetch(API + '/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(loginForm) })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Login failed')
+      localStorage.setItem('hk-auth-token', data.token); setAuthToken(data.token)
+    } catch (error) { setLoginError(error.message) }
+    finally { setAuthLoading(false) }
+  }
+  const signOut = () => { localStorage.removeItem('hk-auth-token'); setAuthToken(''); setLoginForm(f => ({ ...f, password: '' })) }
+  useEffect(() => {
+    if (!authToken) return
+    let active = true
+    ;(async () => {
+      try {
+        const local = JSON.parse(localStorage.getItem('hk-parcel-logs') || '[]')
+        if (local.length) await apiRequest('/parcels/import', { method: 'POST', body: JSON.stringify({ parcels: local }) })
+        const data = await apiRequest('/parcels')
+        if (active) { parcelLogsRef.current = data.parcels; setParcelLogs(data.parcels) }
+      } catch (error) {
+        if (active) { notify('Cloud sync failed: ' + error.message); if (/sign in|session/i.test(error.message)) signOut() }
+      }
+    })()
+    return () => { active = false }
+  }, [authToken])
   useEffect(() => { navigator.storage?.persist?.() }, [])
   useEffect(() => localStorage.setItem('hk-products', JSON.stringify(products)), [products])
   useEffect(() => localStorage.setItem('hk-orders', JSON.stringify(orders)), [orders])
@@ -83,12 +120,20 @@ function App() {
     const entry = { id: Date.now() + Math.random(), code: clean, customerName: String(customerName || '').trim() || 'Name not detected', mode, createdAt: new Date().toISOString() }
     parcelLogsRef.current = [entry, ...logs]
     setParcelLogs(prev => [entry, ...prev])
+    if (authToken) apiRequest('/parcels', { method: 'POST', body: JSON.stringify(entry) }).catch(error => notify('Cloud save failed: ' + error.message))
     const unmatched = isReturn && !logs.some(x => x.code === clean && x.mode === 'dispatch')
     notify(modeLabel(mode) + ' recorded' + (unmatched ? ' (no matching outgoing record found)' : ''))
     return { id: entry.id }
   }
-  const updateParcelName = (id, name) => setParcelLogs(prev => prev.map(x => x.id === id ? { ...x, customerName: name } : x))
-  const deleteParcel = id => { setParcelLogs(prev => prev.filter(x => x.id !== id)); notify('Scan deleted') }
+  const updateParcelName = (id, name) => {
+    setParcelLogs(prev => prev.map(x => x.id === id ? { ...x, customerName: name } : x))
+    if (authToken) apiRequest('/parcels/' + encodeURIComponent(id), { method: 'PATCH', body: JSON.stringify({ customerName: name }) }).catch(error => notify('Cloud update failed: ' + error.message))
+  }
+  const deleteParcel = id => {
+    setParcelLogs(prev => prev.filter(x => x.id !== id))
+    if (authToken) apiRequest('/parcels/' + encodeURIComponent(id), { method: 'DELETE' }).catch(error => notify('Cloud delete failed: ' + error.message))
+    notify('Scan deleted')
+  }
   const exportParcelsCsv = () => {
     if (!parcelLogs.length) { notify('No parcel scans to export yet'); return }
     const rows = [['Date', 'Time', 'Type', 'AWB / Barcode', 'Customer name'], ...[...parcelLogs].reverse().map(x => { const d = new Date(x.createdAt); return [d.toLocaleDateString('en-IN'), d.toLocaleTimeString('en-IN'), modeLabel(x.mode), x.code, x.customerName] })]
@@ -134,6 +179,8 @@ function App() {
       </div>
     </main>
     {modal && <Modal type={modal} products={products} scanValue={scanValue} setScanValue={setScanValue} onClose={() => setModal('')} onProduct={addProduct} onExpense={addExpense} onOrder={addOrder} onMovement={recordMovement} onParcelScan={processParcelScan} onParcelName={updateParcelName} parcelMode={parcelMode} notify={notify}/>}
+    {!authToken && <div className="modal-backdrop auth-backdrop"><form className="modal-form auth-card" onSubmit={signIn}><div className="eyebrow">HISABKITAB SECURE ACCESS</div><h2>Sign in</h2><p className="form-hint">Sign in to sync parcel records with your cloud database.</p><Field label="Username" value={loginForm.username} onChange={v=>setLoginForm(f=>({...f,username:v}))} required/><Field label="Password" value={loginForm.password} onChange={v=>setLoginForm(f=>({...f,password:v}))} type="password" required/>{loginError&&<p className="auth-error">{loginError}</p>}<Button type="submit">{authLoading?'Signing in…':'Sign in'}</Button></form></div>}
+    {authToken && <button className="signout-link" onClick={signOut}>Sign out</button>}
     {toast && <div className="toast"><Check size={17}/>{toast}</div>}
   </div>
 }
